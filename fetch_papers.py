@@ -242,7 +242,7 @@ class PaperFetcher:
                         continue
 
                     paper = {
-                        "title": item.get("title", ""),
+                        "title": item.get("title", "Untitled") or "Untitled",
                         "authors": item.get("authors", ""),
                         "date": item.get("date", ""),
                         "venue": server,
@@ -300,7 +300,7 @@ class PaperFetcher:
                         continue
 
                 title_node = entry.find("atom:title", ns)
-                title = title_node.text.replace("\n", " ").strip() if title_node is not None else ""
+                title = title_node.text.replace("\n", " ").strip() if title_node is not None and title_node.text else "Untitled"
 
                 summary_node = entry.find("atom:summary", ns)
                 abstract = summary_node.text.replace("\n", " ").strip() if summary_node is not None else ""
@@ -367,11 +367,12 @@ class PaperFetcher:
                 continue
 
             # Check title similarity (simple normalized match)
-            # Skip if title is None or empty
-            if not paper.get("title"):
+            # Skip if title is None, empty, or "Untitled"
+            title = paper.get("title", "")
+            if not title or title == "Untitled":
                 continue
 
-            normalized_title = paper["title"].lower().strip()[:100]
+            normalized_title = title.lower().strip()[:100]
             if normalized_title in seen_titles:
                 # Merge sources
                 existing = seen_titles[normalized_title]
