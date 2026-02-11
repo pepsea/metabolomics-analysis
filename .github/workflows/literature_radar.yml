@@ -1,0 +1,92 @@
+name: Literature Radar
+
+on:
+  # 手動実行（iPadから実行可能）
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'Configuration preset'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - quick
+          - comprehensive
+          - weekly
+          - monthly
+          - metabolomics_only
+          - ai_focus
+
+  # スケジュール実行（毎朝9時 JST = 0時 UTC）
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  run-radar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Generate config
+        run: |
+          python3 generate_config.py ${{ github.event.inputs.preset || 'default' }}
+
+      - name: Fetch papers
+        run: |
+          python3 fetch_papers.py
+
+      - name: Process papers
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 process_papers.py
+
+      - name: Get timestamp
+        id: timestamp
+        run: echo "timestamp=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: literature-radar-${{ steps.timestamp.outputs.timestamp }}
+          path: |
+            outputs/*.md
+            outputs/*.json
+          retention-days: 90
+
+      - name: Commit and push results (optional)
+        if: github.event_name == 'schedule' || github.event.inputs.commit == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add outputs/
+          git commit -m "📚 Literature Radar Report - $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git push
+
+      - name: Create summary
+        run: |
+          echo "## 📚 Literature Radar Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find latest markdown file
+          LATEST_MD=$(ls -t outputs/literature_radar_*.md | head -1)
+
+          if [ -f "$LATEST_MD" ]; then
+            echo "✅ Report generated: \`$(basename $LATEST_MD)\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Extract summary section (first 100 lines)
+            head -100 "$LATEST_MD" >> $GITHUB_STEP_SUMMARY
+          fi

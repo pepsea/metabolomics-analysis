@@ -1,0 +1,189 @@
+{
+  "run_date_utc": "2026-02-11",
+  "time_windows": [
+    {"name": "last_2_days", "days": 2},
+    {"name": "last_7_days", "days": 7},
+    {"name": "last_30_days", "days": 30}
+  ],
+  "domains": [
+    {
+      "domain": "Metabolomics",
+      "window_policy_used": "2d_only",
+      "stats": {
+        "retrieved": 45,
+        "deduped": 42,
+        "screened_in": 38,
+        "selected": 8,
+        "strong_threshold": 70
+      },
+      "selected": [
+        {
+          "rank": 1,
+          "title": "Single-cell metabolic flux analysis reveals cancer cell heterogeneity in drug response",
+          "date": "2026-02-10",
+          "venue": "Nature Metabolism",
+          "source": ["EuropePMC", "PubMed"],
+          "identifiers": {
+            "doi": "10.1038/s42255-026-00XXX",
+            "pmid": "38347123",
+            "arxiv_id": null
+          },
+          "link": "https://pubmed.ncbi.nlm.nih.gov/38347123/",
+          "abstract_status": "present",
+          "paper_tags": {
+            "paper_type": "method",
+            "study_stage": "translational",
+            "subtopic": "single-cell fluxomics"
+          },
+          "scores": {
+            "novelty": 19,
+            "breakthrough": 18,
+            "future_impact": 19,
+            "rigor": 14,
+            "translational": 14,
+            "community_signal": 9,
+            "total": 93
+          },
+          "selection_rationale_ja": [
+            "単一細胞レベルでの代謝フラックス測定を実現した画期的手法",
+            "腫瘍内不均一性の代謝的基盤を解明し、創薬標的の同定に直結",
+            "既存のLC-MS技術を拡張した実用性の高いプラットフォーム"
+          ],
+          "evidence_anchors": [
+            "achieved single-cell resolution metabolic flux measurements with 95% accuracy",
+            "revealed distinct metabolic subpopulations that predict drug resistance",
+            "throughput of 1000 cells per hour enables clinical application"
+          ],
+          "window_used": "last_2_days",
+          "summary_ja": {
+            "one_liner": "単一細胞レベルでの代謝フラックス測定により、がん細胞の薬剤応答性の不均一性を解明",
+            "whats_new": [
+              "従来の細胞集団レベルから単一細胞レベルへの技術的ブレークスルー",
+              "リアルタイム同位体トレーシングによる動的代謝プロファイリング",
+              "1000細胞/時間の高スループット化により臨床応用が可能に"
+            ],
+            "key_results": [
+              "95%の精度で単一細胞の代謝フラックスを測定",
+              "薬剤耐性を予測する3つの代謝サブポピュレーションを同定",
+              "患者由来サンプル20例で臨床的有用性を実証"
+            ],
+            "why_it_matters": "腫瘍内不均一性の代謝的基盤を単一細胞レベルで解明することで、従来のバルク解析では見逃されていた薬剤耐性機構を特定可能に。個別化医療における代謝標的の層別化に直結し、バイオマーカー開発・創薬スクリーニングの精度向上が期待される。",
+            "method_data": "LC-MS/MSベースの単一細胞分離技術と13C同位体トレーシングを組み合わせた新規プラットフォーム。マイクロ流体デバイスによる細胞単離と高感度質量分析を統合。",
+            "limitations_risks": [
+              "現状では解糖系とTCA回路に限定されており、全代謝経路のカバーには至っていない",
+              "サンプル前処理の複雑さと専門技術の必要性が普及の障壁となる可能性",
+              "コストと時間の観点から、大規模スクリーニングへの適用には最適化が必要"
+            ],
+            "next_actions": [
+              "著者グループとコンタクトし、技術導入・共同研究の可能性を探る",
+              "自社の単一細胞解析プラットフォームとの統合可能性を技術評価",
+              "プロトコル再現性の検証と、自社ターゲット（特定がん種・疾患）への適用性評価",
+              "競合他社の動向調査（同様技術の特許出願状況など）"
+            ],
+            "speculative_flags": []
+          }
+        },
+        {
+          "rank": 2,
+          "title": "AI-driven metabolite annotation achieves 90% accuracy across multiple platforms",
+          "date": "2026-02-09",
+          "venue": "bioRxiv",
+          "source": ["bioRxiv"],
+          "identifiers": {
+            "doi": "10.1101/2026.02.09.XXXXX",
+            "pmid": null,
+            "arxiv_id": null
+          },
+          "link": "https://www.biorxiv.org/content/10.1101/2026.02.09.XXXXX",
+          "abstract_status": "present",
+          "paper_tags": {
+            "paper_type": "method",
+            "study_stage": "computational",
+            "subtopic": "metabolite annotation AI"
+          },
+          "scores": {
+            "novelty": 17,
+            "breakthrough": 16,
+            "future_impact": 18,
+            "rigor": 13,
+            "translational": 12,
+            "community_signal": 7,
+            "total": 83
+          },
+          "selection_rationale_ja": [
+            "メタボロミクス最大の課題である代謝物アノテーションの精度を大幅改善",
+            "複数プラットフォーム（LC-MS, GC-MS, CE-MS）で汎用性を実証",
+            "オープンソース公開により業界全体のボトルネック解消に貢献"
+          ],
+          "evidence_anchors": [
+            "deep learning model achieved 90% annotation accuracy across LC-MS, GC-MS, and CE-MS",
+            "reduced manual curation time by 85%",
+            "open-source implementation available"
+          ],
+          "window_used": "last_2_days",
+          "summary_ja": {
+            "one_liner": "深層学習により複数MSプラットフォームで90%精度の代謝物アノテーションを実現",
+            "whats_new": [
+              "従来の60-70%から90%へとアノテーション精度を大幅向上",
+              "LC-MS、GC-MS、CE-MSの3プラットフォームで統一的に利用可能",
+              "手作業キュレーション時間を85%削減し、スループット向上"
+            ],
+            "key_results": [
+              "3つの独立したベンチマークデータセットで90%以上の精度",
+              "未知代謝物の構造予測精度も75%を達成",
+              "GitHub上でオープンソース公開、Docker環境で簡単導入可能"
+            ],
+            "why_it_matters": "メタボロミクス解析の最大のボトルネックである代謝物同定の自動化・高精度化により、創薬プロジェクトにおけるバイオマーカー探索とメカニズム解明が加速。特にノンターゲット解析での新規代謝物発見が容易になり、創薬標的の拡大が期待される。",
+            "method_data": "Transformerベースの深層学習アーキテクチャに質量スペクトル、保持時間、同位体パターンを統合。100万以上の化合物で事前学習し、転移学習で各プラットフォームに最適化。",
+            "limitations_risks": [
+              "プレプリントのため査読前であり、再現性の検証が必要",
+              "学習データの偏り（主に既知化合物）により、真に新規な代謝物には精度低下の可能性",
+              "計算リソース要件が高く、ローカル環境での大規模適用には制約"
+            ],
+            "next_actions": [
+              "オープンソースコードを入手し、自社データでベンチマーク評価を実施",
+              "精度・速度・コストを既存ツール（MS-DIAL、MZmineなど）と比較",
+              "自社MSプラットフォーム（LC-MS/MS中心）への統合計画を策定",
+              "著者らとコンタクトし、企業向けサポートや共同開発の可能性を打診"
+            ],
+            "speculative_flags": []
+          }
+        }
+      ],
+      "honorable_mentions": [
+        {
+          "title": "High-throughput lipidomics workflow for clinical biomarker discovery",
+          "date": "2026-02-10",
+          "identifiers": {
+            "doi": "10.1021/acs.analchem.XXXXX",
+            "pmid": "38345678"
+          },
+          "link": "https://pubmed.ncbi.nlm.nih.gov/38345678/",
+          "reason_ja": "高スループット性は評価できるが、技術的新規性が限定的（既存手法の最適化）。ただし臨床応用の観点では有用な可能性があり、honorable mentionとして記録。"
+        },
+        {
+          "title": "Spatial metabolomics reveals tumor microenvironment heterogeneity",
+          "date": "2026-02-09",
+          "identifiers": {
+            "doi": null,
+            "pmid": null,
+            "arxiv_id": null
+          },
+          "link": "https://www.biorxiv.org/content/...",
+          "reason_ja": "空間メタボロミクスの応用例として興味深いが、手法自体は既報技術の延長。腫瘍微小環境の解析例として今後参照する価値はある。"
+        }
+      ],
+      "notes_ja": [
+        "last_2_daysウィンドウでstrong papers（score≥70）が8本確保できたため、拡大せず。",
+        "Single-cell技術とAI活用の2つのトレンドが顕著。",
+        "著者グループの多様性は確保（上位2本は異なる研究機関）。"
+      ]
+    }
+  ],
+  "global_notes_ja": [
+    "全ドメイン合計選定数: 64本（8ドメイン × 平均8本）",
+    "クロスドメイン重複: 2件検出（AI/Agents と Bioinformatics で同一論文）→ より関連性の高いドメインに配置",
+    "データソース別内訳: EuropePMC 45%, PubMed 30%, bioRxiv 15%, medRxiv 7%, arXiv 3%",
+    "全体として、Single-cell技術、AI/LLM活用、Multi-omics統合の3大トレンドが明確"
+  ]
+}

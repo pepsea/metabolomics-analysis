@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# API Keys
+.env
+*.key
+
+# Data files
+fetched_papers.json
+literature_radar_output.json
+outputs/
+*.log
+radar_log.txt
+radar_error.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary
+*.tmp
+temp/

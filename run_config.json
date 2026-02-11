@@ -1,0 +1,31 @@
+{
+  "run_date_utc": "2026-02-11",
+  "time_windows": [
+    {
+      "name": "last_2_days",
+      "days": 2
+    },
+    {
+      "name": "last_7_days",
+      "days": 7
+    },
+    {
+      "name": "last_30_days",
+      "days": 30
+    }
+  ],
+  "max_selected_per_domain": 10,
+  "min_selected_per_domain": 3,
+  "source_priority": [
+    "EuropePMC",
+    "PubMed",
+    "bioRxiv",
+    "medRxiv",
+    "arXiv"
+  ],
+  "strict_sources_only": true,
+  "require_peer_reviewed": false,
+  "include_review_articles": false,
+  "novelty_lookback_days": 90,
+  "output_detail_level": "standard"
+}

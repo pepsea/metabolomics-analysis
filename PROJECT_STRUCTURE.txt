@@ -1,0 +1,183 @@
+Literature Radar Orchestrator - Project Structure
+═══════════════════════════════════════════════════════════
+
+article_search/
+│
+├── 🚀 EXECUTION FILES
+│   ├── run_literature_radar.sh ⭐ MAIN ENTRY POINT
+│   ├── fetch_papers.py          (Step 1: Fetch papers from APIs)
+│   ├── process_papers.py         (Step 2: Score & summarize with Claude)
+│   └── generate_config.py        (Generate run_config.json presets)
+│
+├── 📚 DOCUMENTATION
+│   ├── SETUP_COMPLETE.md ⭐ START HERE
+│   ├── QUICKSTART.md            (5-minute quick start guide)
+│   ├── README.md                (Complete documentation)
+│   ├── WORKFLOW.md              (System architecture & data flow)
+│   └── EXAMPLE_OUTPUT.json      (Sample output structure)
+│
+├── ⚙️  CONFIGURATION
+│   ├── requirements.txt         (Python dependencies)
+│   ├── .gitignore              (Protect sensitive files)
+│   └── run_config.json         (Created on first run)
+│
+└── 📊 OUTPUT FILES (Generated)
+    ├── fetched_papers.json     (Intermediate: Raw fetched papers)
+    └── literature_radar_output.json ⭐ FINAL OUTPUT
+
+
+═══════════════════════════════════════════════════════════
+QUICK START
+═══════════════════════════════════════════════════════════
+
+1. Install dependencies:
+   $ pip install -r requirements.txt
+
+2. Set API key:
+   $ export ANTHROPIC_API_KEY='your-key'
+
+3. Run:
+   $ ./run_literature_radar.sh
+
+4. Check output:
+   $ cat literature_radar_output.json
+
+
+═══════════════════════════════════════════════════════════
+WORKFLOW
+═══════════════════════════════════════════════════════════
+
+                 run_literature_radar.sh
+                          │
+         ┌────────────────┴────────────────┐
+         │                                  │
+    fetch_papers.py              process_papers.py
+         │                                  │
+         │                                  │
+    ┌────▼────┐                        ┌───▼───┐
+    │ Europe  │                        │Claude │
+    │  PMC    │                        │  API  │
+    ├─────────┤                        └───┬───┘
+    │ PubMed  │                            │
+    ├─────────┤                            │
+    │ bioRxiv │                            │
+    ├─────────┤                            │
+    │medRxiv  │                            │
+    ├─────────┤                            │
+    │  arXiv  │                            │
+    └────┬────┘                            │
+         │                                  │
+         ▼                                  │
+  fetched_papers.json ─────────────────────┘
+                                            │
+                                            ▼
+                           literature_radar_output.json
+
+
+═══════════════════════════════════════════════════════════
+8 DOMAINS COVERED
+═══════════════════════════════════════════════════════════
+
+1. Metabolomics      - 代謝物プロファイリング
+2. Lipidomics        - 脂質解析
+3. Proteomics        - タンパク質解析
+4. Transcriptomics   - RNA発現解析
+5. Genomics          - ゲノム解析
+6. Bioinformatics    - マルチオミクス統合
+7. AI/Agents         - AI・機械学習応用
+8. Disease Mechanism - 疾患メカニズム
+
+
+═══════════════════════════════════════════════════════════
+SCORING SYSTEM (0-100 points)
+═══════════════════════════════════════════════════════════
+
+Novelty           ████████████████████ 20 pts
+Breakthrough      ████████████████████ 20 pts
+Future Impact     ████████████████████ 20 pts
+Rigor             ███████████████ 15 pts
+Translational     ███████████████ 15 pts
+Community Signal  ██████████ 10 pts
+                  ────────────────────────
+                  Total: 100 pts
+
+Strong paper threshold: ≥ 70 pts
+
+
+═══════════════════════════════════════════════════════════
+EXECUTION MODES
+═══════════════════════════════════════════════════════════
+
+Mode             Time Window    Papers/Domain  Duration  Cost
+────────────────────────────────────────────────────────────
+Quick            2 days         5              ~5 min    $0.5
+Default          2/7/30 days    10             ~10 min   $1-2
+Comprehensive    up to 90 days  15             ~20 min   $3-5
+
+
+═══════════════════════════════════════════════════════════
+OUTPUT STRUCTURE
+═══════════════════════════════════════════════════════════
+
+literature_radar_output.json
+├── run_date_utc
+├── time_windows[]
+├── domains[]
+│   ├── domain (name)
+│   ├── window_policy_used
+│   ├── stats
+│   │   ├── retrieved
+│   │   ├── deduped
+│   │   ├── screened_in
+│   │   └── selected
+│   ├── selected[]
+│   │   ├── rank
+│   │   ├── title
+│   │   ├── scores (6 criteria + total)
+│   │   ├── evidence_anchors[] (verbatim quotes)
+│   │   └── summary_ja
+│   │       ├── one_liner
+│   │       ├── whats_new[]
+│   │       ├── key_results[]
+│   │       ├── why_it_matters
+│   │       ├── method_data
+│   │       ├── limitations_risks[]
+│   │       └── next_actions[]
+│   └── honorable_mentions[]
+└── global_notes_ja[]
+
+
+═══════════════════════════════════════════════════════════
+CUSTOMIZATION OPTIONS
+═══════════════════════════════════════════════════════════
+
+Preset Configs (via generate_config.py):
+  • default             - Standard configuration
+  • quick               - Fast 2-day scan
+  • comprehensive       - Deep 90-day analysis
+  • peer_reviewed_only  - Exclude preprints
+  • preprints_focus     - Prioritize preprints
+  • metabolomics_only   - Metabolomics + Lipidomics
+  • ai_focus            - AI/Agents + Bioinformatics
+  • weekly              - Weekly reports
+  • monthly             - Monthly deep dive
+
+
+═══════════════════════════════════════════════════════════
+NEXT STEPS
+═══════════════════════════════════════════════════════════
+
+1. Read SETUP_COMPLETE.md
+2. Follow QUICKSTART.md
+3. Run your first scan
+4. Review results in literature_radar_output.json
+5. Set up scheduled runs (cron/launchd)
+6. Customize queries for your domain
+7. Integrate with your workflow (Slack/Notion/Excel)
+
+
+═══════════════════════════════════════════════════════════
+Version: 1.0.0
+Created: 2026-02-11
+License: MIT
+═══════════════════════════════════════════════════════════
