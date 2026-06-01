@@ -33,7 +33,7 @@ DEFAULT_QUERIES = {
     "Genomics": '(genomics OR "long-read sequencing" OR "structural variant" OR pangenome OR "single-cell multiome" OR "CRISPR screen" OR "GWAS fine-mapping")',
     "Bioinformatics": '(bioinformatics OR "multi-omics integration" OR "batch correction" OR "causal inference" OR "network biology" OR "pathway activity" OR "variant interpretation" OR benchmark)',
     "AI/Agents": '((LLM OR "large language model" OR agent OR "tool use" OR RAG OR "retrieval-augmented" OR autonomous OR "scientific discovery") AND (biology OR omics OR biomedical OR "drug discovery"))',
-    "Disease Mechanism": '(("disease mechanism" OR pathogenesis OR causal OR endotype OR "cell-cell interaction" OR microenvironment OR immune OR fibrosis OR neurodegeneration OR "metabolic disease") AND (omics OR "single-cell" OR "multi-omics"))'
+    "Disease Mechanism": '((cancer OR tumor OR oncology OR metastasis OR "tumor microenvironment") OR (neurodegeneration OR Alzheimer OR Parkinson OR dementia) OR (diabetes OR "metabolic disease" OR obesity OR NAFLD) OR (autoimmune OR "inflammatory disease" OR rheumatoid OR lupus OR inflammation) OR ("skin disease" OR psoriasis OR "atopic dermatitis" OR eczema) OR ("eye disease" OR retinopathy OR glaucoma OR "macular degeneration") OR ("rare disease" OR "orphan disease" OR "genetic disorder")) AND (omics OR "single-cell" OR "multi-omics" OR pathogenesis OR mechanism)'
 }
 
 

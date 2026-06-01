@@ -398,7 +398,7 @@ JSON形式で結果を返してください。
         return "".join(md)
 
     def save_output(self, output_data: Dict):
-        """Save output as both JSON and Markdown with timestamp filename"""
+        """Save output as Markdown with timestamp filename"""
 
         # Create output directory if not exists
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -406,12 +406,7 @@ JSON形式で結果を返してください。
         # Generate timestamp filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # JSON output
-        json_filename = os.path.join(OUTPUT_DIR, f"literature_radar_{timestamp}.json")
-        with open(json_filename, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-        # Markdown output
+        # Markdown output only
         md_content = self.json_to_markdown(output_data)
         md_filename = os.path.join(OUTPUT_DIR, f"literature_radar_{timestamp}.md")
         with open(md_filename, "w", encoding="utf-8") as f:
@@ -419,11 +414,10 @@ JSON形式で結果を返してください。
 
         print(f"\n{'='*60}")
         print(f"✅ Output saved:")
-        print(f"   JSON: {json_filename}")
         print(f"   Markdown: {md_filename}")
         print(f"{'='*60}")
 
-        return md_filename, json_filename
+        return md_filename
 
 
 def main():
@@ -457,7 +451,7 @@ def main():
     output = processor.process_all_domains()
 
     # Save
-    md_file, json_file = processor.save_output(output)
+    md_file = processor.save_output(output)
 
     # Summary
     print("\nProcessing Summary:")

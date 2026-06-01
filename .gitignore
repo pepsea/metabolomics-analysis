@@ -34,3 +34,7 @@ Thumbs.db
 # Temporary
 *.tmp
 temp/
+
+# Metabolomics cache
+data/cache/
+.ipynb_checkpoints/

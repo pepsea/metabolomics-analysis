@@ -111,38 +111,15 @@ echo -e "${BLUE}  Summary${NC}"
 echo -e "${BLUE}============================================================${NC}"
 echo ""
 
-# Find the latest output files
-LATEST_JSON=$(ls -t $OUTPUT_DIR/literature_radar_*.json 2>/dev/null | head -1)
+# Find the latest output file
 LATEST_MD=$(ls -t $OUTPUT_DIR/literature_radar_*.md 2>/dev/null | head -1)
 
-if [ -n "$LATEST_JSON" ]; then
-    python3 -c "
-import json
-
-with open('$LATEST_JSON', 'r') as f:
-    data = json.load(f)
-
-print(f\"Run date: {data['run_date_utc']}\")
-print(f\"Time windows: {', '.join([w['name'] for w in data['time_windows']])}\")
-print(\"\")
-print(\"Selected papers by domain:\")
-
-total_selected = 0
-for domain in data['domains']:
-    selected = len(domain.get('selected', []))
-    retrieved = domain['stats']['retrieved']
-    total_selected += selected
-    print(f\"  {domain['domain']:20s}: {selected:2d} / {retrieved:3d} papers\")
-
-print(\"\")
-print(f\"Total selected: {total_selected} papers\")
-"
-
+if [ -n "$LATEST_MD" ]; then
+    echo "Run completed successfully!"
     echo ""
     echo -e "${GREEN}✓ Complete!${NC}"
     echo ""
-    echo -e "Output files:"
-    echo -e "  JSON: ${YELLOW}$LATEST_JSON${NC}"
+    echo -e "Output file:"
     echo -e "  Markdown: ${YELLOW}$LATEST_MD${NC}"
     echo ""
     echo "Next steps:"
@@ -151,5 +128,5 @@ print(f\"Total selected: {total_selected} papers\")
     echo "  - Schedule next run (daily/weekly)"
     echo ""
 else
-    echo -e "${RED}Error: No output files found${NC}"
+    echo -e "${RED}Error: No output file found${NC}"
 fi

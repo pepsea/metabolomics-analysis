@@ -61,9 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: literature-radar-${{ steps.timestamp.outputs.timestamp }}
-          path: |
-            outputs/*.md
-            outputs/*.json
+          path: outputs/*.md
           retention-days: 90
 
       - name: Commit and push results (optional)
