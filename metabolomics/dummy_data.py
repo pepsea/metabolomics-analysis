@@ -172,7 +172,7 @@ def generate_dummy_dataset(
     n_control: int = 10,
     n_treatment: int = 10,
     perturbed_pathways: Optional[List[str]] = None,
-    perturbation_fold_change: float = 2.0,
+    perturbation_fold_change: float = 3.0,
     noise_level: float = 0.3,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:

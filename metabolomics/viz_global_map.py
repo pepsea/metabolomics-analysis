@@ -11,11 +11,13 @@ from .knowledge_base import KnowledgeBase
 def create_global_treemap(
     enrichment_results: pd.DataFrame,
     knowledge_base: KnowledgeBase,
+    metabolite_names: dict = None,
 ) -> go.Figure:
     """Build a Plotly treemap showing the Reactome pathway hierarchy.
 
     Color = enrichment significance (-log10 padj), size = overlap count.
     Non-significant pathways shown in grey.
+    Each tile shows the list of hit molecules on hover.
     """
     hierarchy_df = knowledge_base.get_hierarchy_for_treemap()
     if hierarchy_df.empty:
@@ -26,7 +28,7 @@ def create_global_treemap(
     # Merge enrichment results
     if not enrichment_results.empty and "pathway_id" in enrichment_results.columns:
         merge_cols = ["pathway_id"]
-        value_cols = ["padj", "overlap_count", "combined_score"]
+        value_cols = ["padj", "overlap_count", "combined_score", "overlapping_metabolites"]
         available_cols = [c for c in value_cols if c in enrichment_results.columns]
         merged = hierarchy_df.merge(
             enrichment_results[merge_cols + available_cols],
@@ -43,7 +45,24 @@ def create_global_treemap(
     merged["neg_log10_padj"] = -np.log10(merged["padj"].fillna(1.0).clip(lower=1e-50))
     merged["display_size"] = merged.get("overlap_count", pd.Series(1, index=merged.index)).fillna(0).clip(lower=1).astype(int)
 
-    # Build treemap path: top_level -> parent -> pathway
+    # Build hit molecule list text for hover (wrap every 5 molecules)
+    if "overlapping_metabolites" in merged.columns:
+        def _format_hits(row):
+            mets = row.get("overlapping_metabolites")
+            if not isinstance(mets, list) or not mets:
+                return "(no hits)"
+            if metabolite_names:
+                names = sorted(metabolite_names.get(m, m) for m in mets)
+            else:
+                names = sorted(mets)
+            lines = []
+            for i in range(0, len(names), 5):
+                lines.append(", ".join(names[i:i + 5]))
+            return "<br>".join(lines)
+        merged["hit_molecules"] = merged.apply(_format_hits, axis=1)
+    else:
+        merged["hit_molecules"] = "(no data)"
+
     # Use only pathways that have metabolites
     merged = merged[merged["metabolite_count"] > 0].copy()
     if merged.empty:
@@ -52,7 +71,6 @@ def create_global_treemap(
         return fig
 
     # For treemap, we need: top_level_name / parent_name / name
-    # Handle cases where parent_name == top_level_name (2-level path)
     merged["mid_level"] = merged.apply(
         lambda r: r["parent_name"] if r["parent_name"] != r["top_level_name"] and r["parent_name"] else r["top_level_name"],
         axis=1,
@@ -64,34 +82,45 @@ def create_global_treemap(
         values="display_size",
         color="neg_log10_padj",
         color_continuous_scale=[
-            [0.0, "#e0e0e0"],    # grey (non-significant)
-            [0.2, "#ffffb2"],    # light yellow
-            [0.4, "#fecc5c"],    # yellow
-            [0.6, "#fd8d3c"],    # orange
-            [0.8, "#f03b20"],    # red-orange
-            [1.0, "#bd0026"],    # deep red
+            [0.0, "#ffffff"],       # white (p >= 0.05, -log10 < 1.3)
+            [0.325, "#ffffff"],     # white up to p=0.05 (-log10=1.3)
+            [0.35, "#deebf7"],     # start coloring at p=0.05
+            [0.5, "#9ecae1"],
+            [0.7, "#4292c6"],
+            [0.85, "#2171b5"],
+            [1.0, "#08306b"],      # deepest blue at p=0.0001 (-log10=4)
         ],
-        range_color=[0, 5],
-        hover_data={
-            "neg_log10_padj": ":.2f",
-            "display_size": True,
-            "metabolite_count": True,
-        },
+        range_color=[0, 4],
+        custom_data=["hit_molecules"],
     )
 
     fig.update_layout(
         title="Biological Function Map (Reactome Pathway Hierarchy)",
         margin=dict(t=50, l=10, r=10, b=10),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
         coloraxis_colorbar=dict(
             title="-log10(FDR)",
-            tickvals=[0, 1, 2, 3, 4, 5],
-            ticktext=["NS", "0.1", "0.01", "1e-3", "1e-4", "1e-5"],
+            tickvals=[0, 1, 1.3, 2, 3, 4],
+            ticktext=["NS", "0.1", "0.05", "0.01", "1e-3", "1e-4"],
         ),
         height=700,
     )
     fig.update_traces(
         textinfo="label+value",
-        hovertemplate="<b>%{label}</b><br>Overlap: %{value}<br>-log10(FDR): %{color:.2f}<extra></extra>",
+        marker=dict(
+            cornerradius=0,
+            line=dict(width=0.3, color="black"),
+            depthfade=False,
+        ),
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Overlap: %{value}<br>"
+            "-log10(FDR): %{color:.2f}<br>"
+            "<br><b>Hit molecules:</b><br>"
+            "%{customdata[0]}"
+            "<extra></extra>"
+        ),
     )
 
     return fig
@@ -226,9 +255,15 @@ def create_metabolite_heatmap(
         z=subset.T.values,
         x=subset.index.tolist(),
         y=y_labels,
-        colorscale="RdBu_r",
-        zmid=0,
-        colorbar=dict(title="Z-score"),
+        colorscale=[
+            [0.0, "#f7f7f7"],
+            [0.25, "#fdd49e"],
+            [0.5, "#fc8d59"],
+            [0.75, "#d7301f"],
+            [1.0, "#7f0000"],
+        ],
+        zmin=0,
+        colorbar=dict(title="Abundance<br>(Z-score)"),
     ))
 
     fig.update_layout(
