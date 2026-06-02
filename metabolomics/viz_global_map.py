@@ -70,57 +70,175 @@ def create_global_treemap(
         fig.add_annotation(text="No pathways with metabolites found", showarrow=False, font_size=20)
         return fig
 
-    # For treemap, we need: top_level_name / parent_name / name
+    # Build mid_level grouping
     merged["mid_level"] = merged.apply(
         lambda r: r["parent_name"] if r["parent_name"] != r["top_level_name"] and r["parent_name"] else r["top_level_name"],
         axis=1,
     )
 
-    fig = px.treemap(
-        merged,
-        path=[px.Constant("All Biological Functions"), "top_level_name", "mid_level", "name"],
-        values="display_size",
-        color="neg_log10_padj",
-        color_continuous_scale=[
-            [0.0, "#ffffff"],       # white (p >= 0.05, -log10 < 1.3)
-            [0.325, "#ffffff"],     # white up to p=0.05 (-log10=1.3)
-            [0.35, "#deebf7"],     # start coloring at p=0.05
-            [0.5, "#9ecae1"],
-            [0.7, "#4292c6"],
-            [0.85, "#2171b5"],
-            [1.0, "#08306b"],      # deepest blue at p=0.0001 (-log10=4)
-        ],
-        range_color=[0, 4],
-        custom_data=["hit_molecules"],
-    )
+    # === Build go.Treemap manually for per-node border control ===
+    ROOT = "All Biological Functions"
+    ids, labels, parents, values = [], [], [], []
+    colors, hover_texts = [], []
+    line_colors, line_widths = [], []
+
+    # Significance threshold
+    SIG_THRESHOLD = 1.3  # -log10(0.05)
+    MAX_COLOR = 4.0      # -log10(0.0001)
+
+    def _sig_to_border_color(max_sig):
+        """Map max descendant significance to border color."""
+        if max_sig < SIG_THRESHOLD:
+            return "black"
+        # Scale from light blue to dark blue
+        t = min((max_sig - SIG_THRESHOLD) / (MAX_COLOR - SIG_THRESHOLD), 1.0)
+        blue_colors = ["#9ecae1", "#4292c6", "#2171b5", "#08519c"]
+        idx = min(int(t * (len(blue_colors) - 1)), len(blue_colors) - 1)
+        return blue_colors[idx]
+
+    # Track max significance per parent group
+    top_max_sig = {}   # top_level_name -> max neg_log10_padj
+    mid_max_sig = {}   # (top_level_name, mid_level) -> max neg_log10_padj
+
+    # 1) Leaf nodes (individual pathways)
+    for _, row in merged.iterrows():
+        node_id = f"leaf_{row['id']}"
+        top = row["top_level_name"]
+        mid = row["mid_level"]
+        parent_id = f"mid_{top}_{mid}"
+        sig = row["neg_log10_padj"]
+
+        ids.append(node_id)
+        labels.append(row["name"])
+        parents.append(parent_id)
+        values.append(int(row["display_size"]))
+        colors.append(sig)
+        hover_texts.append(
+            f"<b>{row['name']}</b><br>"
+            f"Overlap: {int(row['display_size'])}<br>"
+            f"-log10(FDR): {sig:.2f}<br>"
+            f"<br><b>Hit molecules:</b><br>"
+            f"{row.get('hit_molecules', '(no data)')}"
+        )
+        line_colors.append("black")
+        line_widths.append(0.3)
+
+        # Track max significance for parents
+        key_mid = (top, mid)
+        mid_max_sig[key_mid] = max(mid_max_sig.get(key_mid, 0), sig)
+        top_max_sig[top] = max(top_max_sig.get(top, 0), sig)
+
+    # 2) Mid-level parent nodes
+    mid_groups = merged.groupby(["top_level_name", "mid_level"]).agg(
+        total_size=("display_size", "sum"),
+    ).reset_index()
+
+    for _, row in mid_groups.iterrows():
+        top = row["top_level_name"]
+        mid = row["mid_level"]
+        node_id = f"mid_{top}_{mid}"
+        parent_id = f"top_{top}"
+
+        # Skip if mid == top (avoid duplicate node)
+        if mid == top:
+            # Re-parent leaf nodes directly under top
+            for i, pid in enumerate(parents):
+                if pid == node_id:
+                    parents[i] = parent_id
+            continue
+
+        max_sig = mid_max_sig.get((top, mid), 0)
+        border = _sig_to_border_color(max_sig)
+        bw = 2.0 if max_sig >= SIG_THRESHOLD else 0.3
+
+        ids.append(node_id)
+        labels.append(mid)
+        parents.append(parent_id)
+        values.append(0)  # parent value auto-computed
+        colors.append(max_sig)
+        sig_count = sum(1 for _, r in merged[(merged["top_level_name"] == top) & (merged["mid_level"] == mid)].iterrows() if r["neg_log10_padj"] >= SIG_THRESHOLD)
+        hover_texts.append(
+            f"<b>{mid}</b><br>"
+            f"Significant pathways: {sig_count}<br>"
+            f"Best -log10(FDR): {max_sig:.2f}"
+        )
+        line_colors.append(border)
+        line_widths.append(bw)
+
+    # 3) Top-level parent nodes
+    for top in merged["top_level_name"].unique():
+        node_id = f"top_{top}"
+        max_sig = top_max_sig.get(top, 0)
+        border = _sig_to_border_color(max_sig)
+        bw = 3.0 if max_sig >= SIG_THRESHOLD else 0.3
+
+        ids.append(node_id)
+        labels.append(top)
+        parents.append(ROOT)
+        values.append(0)
+        colors.append(max_sig)
+        sig_count = sum(1 for _, r in merged[merged["top_level_name"] == top].iterrows() if r["neg_log10_padj"] >= SIG_THRESHOLD)
+        hover_texts.append(
+            f"<b>{top}</b><br>"
+            f"Significant pathways: {sig_count}<br>"
+            f"Best -log10(FDR): {max_sig:.2f}"
+        )
+        line_colors.append(border)
+        line_widths.append(bw)
+
+    # 4) Root node
+    root_max = max(top_max_sig.values()) if top_max_sig else 0
+    ids.append(ROOT)
+    labels.append(ROOT)
+    parents.append("")
+    values.append(0)
+    colors.append(0)
+    hover_texts.append("")
+    line_colors.append("black")
+    line_widths.append(0.3)
+
+    fig = go.Figure(go.Treemap(
+        ids=ids,
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(
+            colors=colors,
+            colorscale=[
+                [0.0, "#ffffff"],
+                [0.325, "#ffffff"],
+                [0.35, "#deebf7"],
+                [0.5, "#9ecae1"],
+                [0.7, "#4292c6"],
+                [0.85, "#2171b5"],
+                [1.0, "#08306b"],
+            ],
+            cmin=0,
+            cmax=MAX_COLOR,
+            cornerradius=0,
+            line=dict(
+                color=line_colors,
+                width=line_widths,
+            ),
+            depthfade=False,
+            colorbar=dict(
+                title="-log10(FDR)",
+                tickvals=[0, 1, 1.3, 2, 3, 4],
+                ticktext=["NS", "0.1", "0.05", "0.01", "1e-3", "1e-4"],
+            ),
+        ),
+        textinfo="label+value",
+        hovertext=hover_texts,
+        hoverinfo="text",
+        branchvalues="remainder",
+    ))
 
     fig.update_layout(
         title="Biological Function Map (Reactome Pathway Hierarchy)",
         margin=dict(t=50, l=10, r=10, b=10),
         paper_bgcolor="white",
         plot_bgcolor="white",
-        coloraxis_colorbar=dict(
-            title="-log10(FDR)",
-            tickvals=[0, 1, 1.3, 2, 3, 4],
-            ticktext=["NS", "0.1", "0.05", "0.01", "1e-3", "1e-4"],
-        ),
         height=700,
-    )
-    fig.update_traces(
-        textinfo="label+value",
-        marker=dict(
-            cornerradius=0,
-            line=dict(width=0.3, color="black"),
-            depthfade=False,
-        ),
-        hovertemplate=(
-            "<b>%{label}</b><br>"
-            "Overlap: %{value}<br>"
-            "-log10(FDR): %{color:.2f}<br>"
-            "<br><b>Hit molecules:</b><br>"
-            "%{customdata[0]}"
-            "<extra></extra>"
-        ),
     )
 
     return fig
