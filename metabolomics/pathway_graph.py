@@ -172,20 +172,9 @@ class PathwayGraphBuilder:
                 if node_id:
                     output_ids.append(node_id)
 
-            # Create direct edges: each input -> each output
-            for inp_id in input_ids:
-                for out_id in output_ids:
-                    if inp_id != out_id:
-                        G.add_edge(
-                            inp_id, out_id,
-                            reaction=_clean_name(reaction_name),
-                            reaction_id=reaction_id,
-                        )
-
-            # Add enzyme/catalyst nodes
+            # Collect enzyme/catalyst nodes for this reaction
+            enzyme_ids = []
             for cat in detail.get("catalystActivity", []):
-                # physicalEntity may not be in the reaction response;
-                # query catalyst detail by dbId to get it
                 activity = cat.get("physicalEntity")
                 if not activity:
                     cat_dbid = cat.get("dbId")
@@ -195,7 +184,6 @@ class PathwayGraphBuilder:
                             activity = cat_detail.get("physicalEntity")
 
                 if activity:
-                    # physicalEntity can be an int (dbId) — resolve it
                     if isinstance(activity, int):
                         activity = self.client.get_reaction_detail(str(activity))
                     if not activity or not isinstance(activity, dict):
@@ -209,14 +197,36 @@ class PathwayGraphBuilder:
                         G.add_node(
                             cat_id,
                             type="enzyme",
-                            name=enz_name[:30],
+                            name=enz_name[:40],
                             full_name=enz_name,
                             compartment=enz_compartment,
                         )
+                    enzyme_ids.append(cat_id)
 
-                    # Link enzyme to outputs
+            # Wire edges: Met → Enz → Met (enzyme in the middle of the flow)
+            if enzyme_ids:
+                for inp_id in input_ids:
+                    for enz_id in enzyme_ids:
+                        G.add_edge(inp_id, enz_id,
+                                   reaction=_clean_name(reaction_name),
+                                   reaction_id=reaction_id,
+                                   role="substrate")
+                for enz_id in enzyme_ids:
                     for out_id in output_ids:
-                        G.add_edge(cat_id, out_id, role="catalyst")
+                        G.add_edge(enz_id, out_id,
+                                   reaction=_clean_name(reaction_name),
+                                   reaction_id=reaction_id,
+                                   role="product")
+            else:
+                # No enzyme: direct substrate → product edge
+                for inp_id in input_ids:
+                    for out_id in output_ids:
+                        if inp_id != out_id:
+                            G.add_edge(
+                                inp_id, out_id,
+                                reaction=_clean_name(reaction_name),
+                                reaction_id=reaction_id,
+                            )
 
         # Remove isolated nodes
         isolated = list(nx.isolates(G))
@@ -268,7 +278,7 @@ class PathwayGraphBuilder:
             G.add_node(
                 node_id,
                 type="metabolite",
-                name=clean[:25],
+                name=clean[:35],
                 full_name=clean,
                 chebi_id=chebi_id or "",
                 compartment=compartment,
@@ -298,89 +308,102 @@ class PathwayGraphBuilder:
 
 
 def compute_compartment_layout(G: nx.DiGraph) -> Dict[str, Tuple[float, float]]:
-    """Compute a compartment-aware layout for a pathway graph.
+    """Compute a flow-based landscape layout for a pathway graph.
 
-    Molecules are grouped by subcellular compartment and arranged
-    in an organized grid within each compartment region.
+    Nodes are arranged left-to-right by topological depth (BFS levels).
+    At each depth level, metabolites occupy vertical lanes and enzymes sit
+    between their upstream metabolites and downstream metabolites at the
+    same x position (or slightly offset).  Compartment backgrounds are
+    drawn as bounding boxes around the nodes that belong to them.
     """
     if len(G.nodes) == 0:
-        return {}
+        return {}, {}
 
-    # Group nodes by compartment
-    compartment_nodes: Dict[str, List[str]] = {}
+    total_nodes = len(G.nodes)
+
+    # Adaptive spacing
+    if total_nodes > 40:
+        x_spacing = 130
+        y_spacing = 80
+    elif total_nodes > 20:
+        x_spacing = 160
+        y_spacing = 95
+    else:
+        x_spacing = 180
+        y_spacing = 110
+
+    # --- Assign topological levels via BFS from source nodes ---
+    # Use longest-path levels so enzymes get a mid-point depth
+    level: Dict[str, int] = {}
+    try:
+        for node in nx.topological_sort(G):
+            preds = list(G.predecessors(node))
+            if not preds:
+                level[node] = 0
+            else:
+                level[node] = max(level.get(p, 0) for p in preds) + 1
+    except nx.NetworkXUnfeasible:
+        # Cycle fallback: BFS from roots
+        roots = [n for n in G.nodes if G.in_degree(n) == 0]
+        if not roots:
+            roots = list(G.nodes)[:1]
+        queue = list(roots)
+        for n in roots:
+            level[n] = 0
+        visited = set(roots)
+        while queue:
+            cur = queue.pop(0)
+            for nxt in G.successors(cur):
+                if nxt not in visited:
+                    level[nxt] = level[cur] + 1
+                    visited.add(nxt)
+                    queue.append(nxt)
+        for n in G.nodes:
+            if n not in level:
+                level[n] = 0
+
+    # Group nodes by level
+    levels_map: Dict[int, List[str]] = {}
+    for node, lv in level.items():
+        levels_map.setdefault(lv, []).append(node)
+
+    # Within each level: metabolites first, then enzymes (so enzymes
+    # appear at the same x as their immediate successors)
+    positions: Dict[str, Tuple[float, float]] = {}
+    for lv, nodes in sorted(levels_map.items()):
+        mets = sorted([n for n in nodes if G.nodes[n].get("type") == "metabolite"])
+        enzs = sorted([n for n in nodes if G.nodes[n].get("type") == "enzyme"])
+        ordered = mets + enzs
+        n = len(ordered)
+        # Centre the column vertically
+        total_height = (n - 1) * y_spacing
+        y_start = -total_height / 2
+        for i, node in enumerate(ordered):
+            x = lv * x_spacing
+            y = y_start + i * y_spacing
+            positions[node] = (x, y)
+
+    # --- Build compartment bounding boxes ---
+    compartment_bounds: Dict[str, Tuple[float, float, float, float]] = {}
+    pad = 30
     for node, data in G.nodes(data=True):
         comp = data.get("compartment", "cytosol")
-        if comp not in compartment_nodes:
-            compartment_nodes[comp] = []
-        compartment_nodes[comp].append(node)
+        if node not in positions:
+            continue
+        x, y = positions[node]
+        if comp not in compartment_bounds:
+            compartment_bounds[comp] = (y, y, x, x)  # y_min, y_max, x_min, x_max
+        else:
+            y_min, y_max, x_min, x_max = compartment_bounds[comp]
+            compartment_bounds[comp] = (
+                min(y_min, y), max(y_max, y),
+                min(x_min, x), max(x_max, x),
+            )
 
-    # Sort compartments by canonical order
-    def _comp_sort_key(comp_name):
-        try:
-            return COMPARTMENT_ORDER.index(comp_name)
-        except ValueError:
-            return 999
-
-    sorted_compartments = sorted(compartment_nodes.keys(), key=_comp_sort_key)
-
-    # Assign vertical bands to compartments
-    positions = {}
-    y_offset = 0
-    compartment_bounds = {}  # comp -> (y_min, y_max, x_min, x_max)
-
-    for comp in sorted_compartments:
-        nodes = compartment_nodes[comp]
-
-        # Separate metabolites and enzymes
-        metabolites = [n for n in nodes if G.nodes[n].get("type") == "metabolite"]
-        enzymes = [n for n in nodes if G.nodes[n].get("type") == "enzyme"]
-
-        # Order metabolites by topological position within this compartment
-        # Try to place upstream (fewer predecessors) on the left
-        sub = G.subgraph(nodes)
-        try:
-            topo_order = list(nx.topological_sort(sub))
-            metabolites_ordered = [n for n in topo_order if n in metabolites]
-            enzymes_ordered = [n for n in topo_order if n in enzymes]
-        except nx.NetworkXUnfeasible:
-            metabolites_ordered = metabolites
-            enzymes_ordered = enzymes
-
-        # Layout within compartment: grid arrangement
-        n_met = len(metabolites_ordered)
-        cols = max(1, min(6, n_met))  # max 6 columns
-        rows_met = (n_met + cols - 1) // cols
-
-        x_spacing = 120
-        y_spacing = 100
-
-        # Place metabolites in grid
-        for i, node in enumerate(metabolites_ordered):
-            col = i % cols
-            row = i // cols
-            x = col * x_spacing + 60
-            y = y_offset + row * y_spacing + 50
-            positions[node] = (x, y)
-
-        # Place enzymes below metabolites
-        met_height = rows_met * y_spacing if n_met > 0 else 0
-        for i, node in enumerate(enzymes_ordered):
-            col = i % cols
-            x = col * x_spacing + 60
-            y = y_offset + met_height + i // cols * (y_spacing * 0.7) + 30
-            positions[node] = (x, y)
-
-        enz_height = ((len(enzymes_ordered) + cols - 1) // cols) * y_spacing * 0.7 if enzymes_ordered else 0
-        total_height = met_height + enz_height + 80
-        total_width = cols * x_spacing + 40
-
-        compartment_bounds[comp] = (
-            y_offset - 10,
-            y_offset + total_height,
-            -20,
-            total_width,
-        )
-
-        y_offset += total_height + 40  # gap between compartments
+    # Add padding
+    compartment_bounds = {
+        comp: (y_min - pad, y_max + pad, x_min - pad, x_max + pad)
+        for comp, (y_min, y_max, x_min, x_max) in compartment_bounds.items()
+    }
 
     return positions, compartment_bounds

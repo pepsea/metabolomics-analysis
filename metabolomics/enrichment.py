@@ -181,6 +181,8 @@ def over_representation_analysis(
     else:
         df["padj"] = []
 
+    if df.empty or "pvalue" not in df.columns:
+        return df
     return df.sort_values("pvalue").reset_index(drop=True)
 
 

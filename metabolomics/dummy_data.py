@@ -174,7 +174,7 @@ def generate_dummy_dataset(
     perturbed_pathways: Optional[List[str]] = None,
     perturbation_fold_change: float = 3.0,
     noise_level: float = 0.3,
-    seed: int = 42,
+    seed: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     """Generate a synthetic metabolomics dataset with known pathway perturbations.
 
@@ -184,7 +184,7 @@ def generate_dummy_dataset(
         perturbed_pathways: List of pathway names to perturb (e.g. ["TCA cycle", "Glycolysis"]).
         perturbation_fold_change: Fold-change to inject for perturbed metabolites.
         noise_level: Standard deviation of log-normal noise.
-        seed: Random seed for reproducibility.
+        seed: Random seed for reproducibility. None = random each time.
 
     Returns:
         data: DataFrame (samples x metabolites), columns are ChEBI IDs.
@@ -207,19 +207,24 @@ def generate_dummy_dataset(
     for j in range(n_metabolites):
         data[:, j] = rng.lognormal(mean=log_means[j], sigma=noise_level, size=n_total)
 
-    # Identify perturbed metabolites and inject fold-changes in treatment group
+    # Collect all unique perturbed metabolites across pathways (deduped)
+    # Assign direction once per metabolite to avoid conflicting up/down from shared pathways
     ground_truth = {}
+    all_perturbed: dict = {}  # chebi_id -> direction (+1 or -1)
     for pathway in perturbed_pathways:
         perturbed_ids = _get_metabolites_for_pathway(pathway)
         ground_truth[pathway] = perturbed_ids
         for chebi_id in perturbed_ids:
-            if chebi_id in chebi_ids:
-                j = chebi_ids.index(chebi_id)
-                # Apply fold-change to treatment samples with some variation
-                fc_variation = rng.normal(
-                    np.log2(perturbation_fold_change), 0.3, size=n_treatment
-                )
-                data[n_control:, j] *= 2 ** fc_variation
+            if chebi_id in chebi_ids and chebi_id not in all_perturbed:
+                all_perturbed[chebi_id] = 1 if rng.random() < 0.6 else -1
+
+    # Apply fold-changes (each metabolite gets exactly one consistent direction)
+    for chebi_id, direction in all_perturbed.items():
+        j = chebi_ids.index(chebi_id)
+        fc_variation = rng.normal(
+            direction * np.log2(perturbation_fold_change), 0.3, size=n_treatment
+        )
+        data[n_control:, j] *= 2 ** fc_variation
 
     # Build DataFrames
     sample_ids = [f"CTRL_{i+1:03d}" for i in range(n_control)] + [
