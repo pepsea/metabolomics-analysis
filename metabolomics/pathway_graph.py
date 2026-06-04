@@ -316,27 +316,43 @@ def compute_compartment_layout(G: nx.DiGraph):
     else:
         x_spacing, y_spacing = 240, 104
 
-    # --- Topological depth (longest path from a source) ---
+    # --- Topological depth, computed PER weakly-connected component ---
+    # Each disconnected sub-flow (e.g. the same reaction duplicated in two
+    # compartments) is laid out independently from its own depth 0, so
+    # structurally identical flows get identical layouts. Cyclic components
+    # (reversible reactions) fall back to BFS from a low in-degree start.
     level: Dict[str, int] = {}
-    try:
-        for node in nx.topological_sort(G):
-            preds = list(G.predecessors(node))
-            level[node] = 0 if not preds else max(level.get(p, 0) for p in preds) + 1
-    except nx.NetworkXUnfeasible:
-        roots = [n for n in G.nodes if G.in_degree(n) == 0] or [next(iter(G.nodes))]
-        dq = deque(roots)
-        for r in roots:
-            level[r] = 0
-        seen = set(roots)
-        while dq:
-            cur = dq.popleft()
-            for s in G.successors(cur):
-                if s not in seen:
-                    level[s] = level[cur] + 1
-                    seen.add(s)
-                    dq.append(s)
-        for n in G.nodes:
-            level.setdefault(n, 0)
+    for comp_nodes in nx.weakly_connected_components(G):
+        sub = G.subgraph(comp_nodes)
+        try:
+            for node in nx.topological_sort(sub):
+                preds = list(sub.predecessors(node))
+                level[node] = 0 if not preds else max(level[p] for p in preds) + 1
+        except nx.NetworkXUnfeasible:
+            start = min(sub.nodes, key=lambda n: (sub.in_degree(n), str(n)))
+            dq = deque([start])
+            level[start] = 0
+            seen = {start}
+            while dq:
+                cur = dq.popleft()
+                for s in sub.successors(cur):
+                    if s not in seen:
+                        level[s] = level[cur] + 1
+                        seen.add(s)
+                        dq.append(s)
+            # Reach any nodes not hit by directed BFS via undirected edges
+            if len(seen) < len(comp_nodes):
+                und = sub.to_undirected()
+                dq = deque(seen)
+                while dq:
+                    cur = dq.popleft()
+                    for s in und.neighbors(cur):
+                        if s not in seen:
+                            level[s] = level[cur] + 1
+                            seen.add(s)
+                            dq.append(s)
+            for n in comp_nodes:
+                level.setdefault(n, 0)
 
     depths = sorted(set(level.values()))
     max_depth = max(depths) if depths else 0
