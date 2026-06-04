@@ -84,16 +84,16 @@ def create_pathway_flow_diagram(
         )
         return _FlowFig(fig)
 
-    # ── Style presets ─────────────────────────────────────────────────────────
+    # ── Style presets (fonts/arrows; marker size is computed dynamically) ─────
     if ppt_mode:
-        MARKER_SIZE = 26
+        MAX_MARKER  = 26 * fig_scale
         MET_FONT    = 13
         COMP_FONT   = 14
         TITLE_FONT  = 20
         ARROW_SIZE  = 2.0
         ARROW_WIDTH = 1.3
     else:
-        MARKER_SIZE = 18
+        MAX_MARKER  = 18 * fig_scale
         MET_FONT    = 10
         COMP_FONT   = 11
         TITLE_FONT  = 16
@@ -108,6 +108,45 @@ def create_pathway_flow_diagram(
     y_min, y_max = min(ys), max(ys)
     x_rng = max(x_max - x_min, 1)
     y_rng = max(y_max - y_min, 1)
+
+    # ── Padding (data units) ──────────────────────────────────────────────────
+    x_pad = x_rng * 0.10 + 40
+    y_pad_bot = y_rng * 0.12 + 30
+    y_pad_top = y_rng * 0.16 + 45      # headroom for compartment labels
+    y_data_range = y_rng + y_pad_bot + y_pad_top
+
+    # ── Dynamic marker size; grow figure height only if unavoidable ───────────
+    # Tightest vertical gap between vertically-stacked nodes (same column).
+    from collections import defaultdict
+    _col_y = defaultdict(list)
+    for (_px, _py) in layout.values():
+        _col_y[round(_px)].append(_py)
+    min_gap = None
+    for _vals in _col_y.values():
+        _vals.sort()
+        for _i in range(len(_vals) - 1):
+            _g = _vals[_i + 1] - _vals[_i]
+            if _g > 1e-6:
+                min_gap = _g if min_gap is None else min(min_gap, _g)
+    if min_gap is None:
+        min_gap = y_data_range             # no stacking → markers may be large
+
+    V_MARGIN_PX = 80 * fig_scale           # title + top/bottom margins
+    MIN_MARKER  = 8 * fig_scale            # smallest readable circle
+    FILL = 0.72                            # circle fills ~72% of the gap
+
+    base_plot_h = max(fig_h - V_MARGIN_PX, 1)
+    gap_px_base = min_gap * (base_plot_h / y_data_range)
+    marker_fit  = gap_px_base * FILL
+
+    if marker_fit >= MIN_MARKER:
+        # Fits at the fixed landscape height: just shrink the marker.
+        MARKER_SIZE = max(MIN_MARKER, min(MAX_MARKER, marker_fit))
+    else:
+        # Too crowded even at the minimum marker → grow the figure height.
+        MARKER_SIZE = MIN_MARKER
+        needed_plot_h = (MARKER_SIZE / FILL) * y_data_range / min_gap
+        fig_h = int(min(4000 * fig_scale, needed_plot_h + V_MARGIN_PX))
 
     # ── Compartment background bands ──────────────────────────────────────────
     if compartment_bounds:
@@ -237,11 +276,7 @@ def create_pathway_flow_diagram(
             showlegend=False,
         ))
 
-    # ── Axes / layout (fixed landscape, equal-ish padding) ────────────────────
-    x_pad = x_rng * 0.10 + 40
-    y_pad_bot = y_rng * 0.12 + 30
-    y_pad_top = y_rng * 0.16 + 45     # headroom for compartment labels
-
+    # ── Axes / layout (landscape; height may have grown for dense graphs) ─────
     fig.update_layout(
         title=dict(text=f"Pathway Flow: {pathway_name}",
                    font=dict(size=TITLE_FONT), x=0.01, xanchor="left"),
