@@ -362,39 +362,63 @@ def compute_compartment_layout(G: nx.DiGraph):
         c: max([len(cell[(c, d)]) for d in depths] + [1]) for c in comps
     }
 
-    # --- Assign positions, stacking bands downward ---
-    positions: Dict[str, Tuple[float, float]] = {}
-    compartment_bounds: Dict[str, Tuple[float, float, float, float]] = {}
-
+    # --- Per-compartment band geometry (vertical regions, stacked downward) ---
     x_left = -x_spacing * 0.45
     x_right = max_depth * x_spacing + x_spacing * 0.45
     gap_between_bands = y_spacing * 0.7
     band_pad = y_spacing * 0.45
 
+    band_center: Dict[str, float] = {}
+    compartment_bounds: Dict[str, Tuple[float, float, float, float]] = {}
     cur_top = 0.0
     for c in comps:
-        rows = band_rows[c]
-        band_height = (rows - 1) * y_spacing
+        band_height = (band_rows[c] - 1) * y_spacing
         band_top = cur_top
         band_bottom = cur_top - band_height
-        band_center = (band_top + band_bottom) / 2.0
-
-        for d in depths:
-            grp = sorted(cell[(c, d)])
-            k = len(grp)
-            if k == 0:
-                continue
-            sub_h = (k - 1) * y_spacing
-            y0 = band_center + sub_h / 2.0
-            for i, node in enumerate(grp):
-                positions[node] = (d * x_spacing, y0 - i * y_spacing)
-
+        band_center[c] = (band_top + band_bottom) / 2.0
         compartment_bounds[c] = (
-            band_bottom - band_pad,   # y_min
-            band_top + band_pad,      # y_max
-            x_left,                   # x_min
-            x_right,                  # x_max
+            band_bottom - band_pad, band_top + band_pad, x_left, x_right
         )
         cur_top = band_bottom - gap_between_bands
+
+    # --- Order nodes within each (compartment, depth) cell ---------------------
+    # Start alphabetical, then run barycenter sweeps (Sugiyama-style) so a node
+    # sits near the average height of its connected neighbours. This untangles
+    # the flow and makes cross-relationships between metabolites visible.
+    cell_order: Dict[Tuple[str, int], List[str]] = {
+        (c, d): sorted(cell[(c, d)]) for c in comps for d in depths if cell[(c, d)]
+    }
+
+    def _assign(order) -> Dict[str, Tuple[float, float]]:
+        pos: Dict[str, Tuple[float, float]] = {}
+        for c in comps:
+            cc = band_center[c]
+            for d in depths:
+                grp = order.get((c, d))
+                if not grp:
+                    continue
+                y0 = cc + (len(grp) - 1) * y_spacing / 2.0
+                for i, node in enumerate(grp):
+                    pos[node] = (d * x_spacing, y0 - i * y_spacing)
+        return pos
+
+    positions = _assign(cell_order)
+
+    # Barycenter sweeps (alternate forward / backward through depths)
+    for sweep in range(6):
+        order_depths = depths if sweep % 2 == 0 else list(reversed(depths))
+        for d in order_depths:
+            for c in comps:
+                grp = cell_order.get((c, d))
+                if not grp or len(grp) <= 1:
+                    continue
+                bary = {}
+                for node in grp:
+                    nbrs = list(G.predecessors(node)) + list(G.successors(node))
+                    ys = [positions[m][1] for m in nbrs if m in positions]
+                    bary[node] = sum(ys) / len(ys) if ys else positions[node][1]
+                # Highest barycenter → top (largest y). Stable for ties.
+                cell_order[(c, d)] = sorted(grp, key=lambda n: -bary[n])
+            positions = _assign(cell_order)
 
     return positions, compartment_bounds
