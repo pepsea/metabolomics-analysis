@@ -16,6 +16,33 @@ import plotly.graph_objects as go
 from .pathway_graph import COMPARTMENT_COLORS, COMPARTMENT_LABELS
 
 
+class _FlowFig:
+    """Wrapper around a Plotly Figure.
+
+    Plotly's interactive .show() depends on a JS renderer that is blank in
+    some Jupyter setups. To display reliably everywhere, .show() renders a
+    static PNG inline (via kaleido) instead. The underlying figure is exposed
+    as .fig for interactive use, and all other attributes/methods
+    (write_image, write_html, update_layout, ...) delegate to it.
+    """
+
+    def __init__(self, fig: go.Figure):
+        self.fig = fig
+
+    def show(self, scale: float = 2.0, *_a, **_k):
+        try:
+            from IPython.display import Image, display
+            png = self.fig.to_image(format="png", scale=scale)
+            display(Image(data=png))
+        except Exception:
+            # Fall back to interactive renderer if static export unavailable
+            self.fig.show()
+
+    def __getattr__(self, name):
+        # Delegate everything else (write_image, write_html, layout, data, ...)
+        return getattr(self.fig, name)
+
+
 def create_pathway_flow_diagram(
     G: Optional[nx.DiGraph],
     layout: Dict[str, Tuple[float, float]],
@@ -55,7 +82,7 @@ def create_pathway_flow_diagram(
             width=fig_w, height=fig_h,
             plot_bgcolor="white", paper_bgcolor="white",
         )
-        return fig
+        return _FlowFig(fig)
 
     # ── Style presets ─────────────────────────────────────────────────────────
     if ppt_mode:
@@ -227,7 +254,7 @@ def create_pathway_flow_diagram(
                    range=[y_min - y_pad_bot, y_max + y_pad_top]),
         hovermode="closest",
     )
-    return fig
+    return _FlowFig(fig)
 
 
 # ── Pathway summary table (Plotly) ────────────────────────────────────────────
