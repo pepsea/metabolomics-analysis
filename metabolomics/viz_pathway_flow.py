@@ -1,396 +1,347 @@
-"""Pathway flow diagram visualization with compartment-aware layout."""
+"""Pathway flow diagram visualization using Matplotlib.
+
+Replaces the previous Plotly-based implementation to achieve reliable
+compartment rendering and clearly visible arrowheads.
+"""
+
+from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
 
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")          # non-interactive; Jupyter shows via display()
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import Circle, Polygon, Rectangle
+from matplotlib.colors import Normalize, to_rgba
+from matplotlib.cm import ScalarMappable
+import matplotlib.cm as mcm
 import networkx as nx
-import plotly.graph_objects as go
 
 from .pathway_graph import COMPARTMENT_COLORS, COMPARTMENT_LABELS
 
 
+# ── Colour-map for fold-change ────────────────────────────────────────────────
+_CMAP = mcm.RdBu_r
+_NORM = Normalize(vmin=-3, vmax=3)
+
+
+def _fc_color(fc):
+    """Map log2 fold-change to an RGBA colour."""
+    if fc is None:
+        return (0.88, 0.88, 0.88, 1.0)   # light grey = unmeasured
+    return _CMAP(_NORM(fc))
+
+
+# ── Public wrapper ────────────────────────────────────────────────────────────
+class _MplFig:
+    """Thin wrapper so callers can use .show() and .write_image() as before."""
+
+    def __init__(self, fig: plt.Figure):
+        self._fig = fig
+
+    # Jupyter: display the figure
+    def show(self):
+        from IPython.display import display as _display
+        _display(self._fig)
+        plt.close(self._fig)
+
+    # PNG / SVG export (scale maps to DPI multiplier on 100-dpi base)
+    def write_image(self, path, scale: float = 1.0, **_kw):
+        self._fig.savefig(str(path), dpi=int(100 * scale),
+                          bbox_inches="tight", facecolor="white")
+
+    # No-op for HTML (caller may try this for interactive export)
+    def write_html(self, path, **_kw):
+        png_path = str(path).rsplit(".", 1)[0] + ".png"
+        self.write_image(png_path)
+
+    @property
+    def layout(self):
+        w = self._fig.get_figwidth() * 100
+        h = self._fig.get_figheight() * 100
+        return type("_L", (), {"width": w, "height": h})()
+
+
+# ── Main function ─────────────────────────────────────────────────────────────
 def create_pathway_flow_diagram(
-    G: nx.DiGraph,
+    G: Optional[nx.DiGraph],
     layout: Dict[str, Tuple[float, float]],
     pathway_name: str,
     compartment_bounds: Optional[Dict[str, Tuple[float, float, float, float]]] = None,
     ppt_mode: bool = True,
     fig_scale: float = 1.0,
-) -> go.Figure:
-    """Render a pathway as an interactive flow diagram with compartment regions.
-
-    Compartments are drawn as colored rectangular regions.
-    Metabolites are placed in organized grids within each compartment.
-    Each molecule appears only once. Directed arrows show reaction flow.
-
-    Node styling:
-        - Metabolites: circles, colored by fold-change (RdBu diverging)
-        - Enzymes: squares, light blue
+) -> _MplFig:
+    """Render a pathway flow diagram with Matplotlib.
 
     Args:
-        G: NetworkX DiGraph with node attributes (type, compartment, fold_change, etc.)
-        layout: Dict of node_id -> (x, y) positions.
-        pathway_name: Display name for the title.
-        compartment_bounds: Dict of compartment -> (y_min, y_max, x_min, x_max).
-        ppt_mode: If True, use larger fonts/nodes for PowerPoint readability.
+        G: NetworkX DiGraph (node attrs: type, name, compartment, fold_change).
+        layout: {node_id: (x, y)} from compute_compartment_layout.
+        pathway_name: Title string.
+        compartment_bounds: {comp: (y_min, y_max, x_min, x_max)}.
+        ppt_mode: Use larger fonts for PowerPoint.
+        fig_scale: Overall size multiplier (1.0 = default).
+
+    Returns:
+        _MplFig wrapper with .show() and .write_image() methods.
     """
-    if not G or len(G.nodes) == 0:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No pathway graph data available.<br>Reactome API connection may be required.",
-            showarrow=False, font_size=16,
-        )
-        fig.update_layout(title=pathway_name, height=500)
-        return fig
+    # ── Empty / error state ───────────────────────────────────────────────────
+    if not G or len(G.nodes) == 0 or not layout:
+        fig, ax = plt.subplots(figsize=(10 * fig_scale, 4 * fig_scale))
+        ax.text(0.5, 0.5,
+                "No pathway graph data available.\n(Reactome API connection may be required.)",
+                ha="center", va="center", fontsize=12, color="#666666",
+                transform=ax.transAxes)
+        ax.set_title(f"Pathway Flow: {pathway_name}", fontsize=14, pad=8)
+        ax.axis("off")
+        plt.tight_layout()
+        return _MplFig(fig)
 
-    # --- Size presets for PPT vs screen (fonts are fixed; markers may scale) ---
+    # ── Font & style sizes ────────────────────────────────────────────────────
     if ppt_mode:
-        MET_MARKER_MAX = 36
-        MET_MARKER_MIN = 14
-        ENZ_MARKER_SIZE = 14   # fixed small diamond; never scales
-        ENZ_LINE_WIDTH = 0.8   # thin border
-        MET_FONT_SIZE = 14
-        ENZ_FONT_SIZE = 12
-        COMP_LABEL_SIZE = 16
-        EDGE_WIDTH = 0.8
-        ARROW_SIZE = 1.8
-        ARROW_WIDTH = 1.5
-        TITLE_SIZE = 22
-        COLORBAR_FONT = 13
-        STANDOFF = 20
-        MET_LINE_WIDTH = 2.5
-        BASE_WIDTH = 1200   # slightly smaller default than before
-        BASE_HEIGHT = 580
-        V_MARGINS = 110
+        MET_FONT   = 9
+        ENZ_FONT   = 7
+        COMP_FONT  = 9
+        TITLE_FONT = 13
     else:
-        MET_MARKER_MAX = 22
-        MET_MARKER_MIN = 10
-        ENZ_MARKER_SIZE = 10   # fixed small diamond; never scales
-        ENZ_LINE_WIDTH = 0.6   # thin border
-        MET_FONT_SIZE = 9
-        ENZ_FONT_SIZE = 8
-        COMP_LABEL_SIZE = 11
-        EDGE_WIDTH = 0.6
-        ARROW_SIZE = 1.5
-        ARROW_WIDTH = 1.2
-        TITLE_SIZE = 16
-        COLORBAR_FONT = 11
-        STANDOFF = 12
-        MET_LINE_WIDTH = 2
-        BASE_WIDTH = 900
-        BASE_HEIGHT = 480
-        V_MARGINS = 80
+        MET_FONT   = 7
+        ENZ_FONT   = 6
+        COMP_FONT  = 7
+        TITLE_FONT = 11
 
-    # --- Dynamic marker size based on node density (metabolites only) ---
-    level_counts: dict = {}
-    for pos in layout.values():
-        level_counts[pos[0]] = level_counts.get(pos[0], 0) + 1
-    max_nodes_per_level = max(level_counts.values()) if level_counts else 1
+    # ── Layout geometry ───────────────────────────────────────────────────────
+    all_x = [p[0] for p in layout.values()]
+    all_y = [p[1] for p in layout.values()]
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
 
-    avail_per_node = (BASE_HEIGHT - V_MARGINS) / max_nodes_per_level
+    x_range = max(x_max - x_min, 1)
+    y_range = max(y_max - y_min, 1)
 
-    FILL_RATIO = 0.72
-    if avail_per_node >= MET_MARKER_MAX / FILL_RATIO:
-        MET_MARKER_SIZE = MET_MARKER_MAX
-        fig_height = BASE_HEIGHT
-    else:
-        MET_MARKER_SIZE = max(MET_MARKER_MIN, int(avail_per_node * FILL_RATIO))
-        if MET_MARKER_SIZE <= MET_MARKER_MIN:
-            fig_height = max(BASE_HEIGHT,
-                             int(max_nodes_per_level * (MET_MARKER_MIN / FILL_RATIO)) + V_MARGINS)
-        else:
-            fig_height = BASE_HEIGHT
+    # Padding in data units
+    x_pad = x_range * 0.12 + 60
+    y_pad_bot = y_range * 0.10 + 30
+    y_pad_top = y_range * 0.20 + 50   # extra space for comp. labels above
 
-    # Apply fig_scale to both dimensions (after density-based height is settled)
-    fig_width = int(BASE_WIDTH * fig_scale)
-    fig_height = int(fig_height * fig_scale)
+    # Estimate y_spacing (min gap between nodes vertically)
+    y_sorted = sorted(set(round(p[1]) for p in layout.values()))
+    y_gaps = [y_sorted[i+1] - y_sorted[i] for i in range(len(y_sorted)-1)]
+    y_spacing = min(y_gaps) if y_gaps else 100
 
-    # --- Compute scale for label-collision detection ---
-    _y_vals = [pos[1] for pos in layout.values()]
-    _y_pad = 60 if ppt_mode else 40
-    _y_data_range = (max(_y_vals) - min(_y_vals) + 2 * _y_pad) if len(_y_vals) > 1 else 1
-    _scale = (fig_height - V_MARGINS) / _y_data_range  # data units → pixels
+    # Node sizes in data units
+    # metabolite radius ≈ 28% of y_spacing; enzyme diamond half-size ≈ 12%
+    met_r  = y_spacing * 0.28
+    enz_hf = y_spacing * 0.12
 
-    # Vertical clearance a "top center" label needs above the node centre (data units):
-    # half marker radius + font cap-height (≈ font_size * 1.4)
-    _dy_clear = (MET_MARKER_SIZE / 2 + MET_FONT_SIZE * 1.4) / max(_scale, 0.01)
+    # ── Figure size from data aspect ratio ───────────────────────────────────
+    data_w = x_range + 2 * x_pad
+    data_h = y_range + y_pad_bot + y_pad_top
 
-    # x-threshold: anything within half an x-step counts as "same or next level"
-    _x_vals = [pos[0] for pos in layout.values()]
-    _x_steps = sorted({round(x) for x in _x_vals})
-    _dx_step = (_x_steps[1] - _x_steps[0]) if len(_x_steps) > 1 else 180
+    base_fig_w = 13.0 * fig_scale   # inches
+    fig_w = base_fig_w
+    # Keep equal aspect so circles look round
+    fig_h = fig_w * (data_h / data_w)
+    fig_h = max(4.0 * fig_scale, min(22.0 * fig_scale, fig_h))
 
-    def _best_textpos_met(nodes):
-        """Return per-node textposition list for metabolites.
+    # ── Create figure ─────────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.set_aspect("equal")
+    ax.set_xlim(x_min - x_pad, x_max + x_pad)
+    ax.set_ylim(y_min - y_pad_bot, y_max + y_pad_top)
+    ax.axis("off")
+    ax.set_title(f"Pathway Flow: {pathway_name}",
+                 fontsize=TITLE_FONT, fontweight="bold", pad=8)
 
-        Priority: "top center" → clear above?  yes → keep.
-                  no → "middle right" → clear to right? yes → use.
-                  no → "middle left" → clear to left? yes → use.
-                  fallback → "top center".
-        """
-        all_xy = list(layout.values())
-
-        def _any_node_in_box(cx, cy, dx_lo, dx_hi, dy_lo, dy_hi):
-            return any(
-                dx_lo < (px - cx) <= dx_hi and dy_lo < (py - cy) <= dy_hi
-                for px, py in all_xy
-            )
-
-        pos_map = {}
-        for n, _ in nodes:
-            x, y = layout[n]
-            # "top center" clears if no node within _dy_clear directly above
-            if not _any_node_in_box(x, y,
-                                     -_dx_step * 0.4, _dx_step * 0.4,
-                                     0, _dy_clear):
-                pos_map[n] = "top center"
-            # "middle right": label goes to the right; clear if no node within
-            # half x-step to the right at similar y
-            elif not _any_node_in_box(x, y,
-                                       0, _dx_step * 0.8,
-                                       -_dy_clear * 0.5, _dy_clear * 0.5):
-                pos_map[n] = "middle right"
-            # "middle left": symmetric check to the left
-            elif not _any_node_in_box(x, y,
-                                       -_dx_step * 0.8, 0,
-                                       -_dy_clear * 0.5, _dy_clear * 0.5):
-                pos_map[n] = "middle left"
-            else:
-                pos_map[n] = "top center"   # graceful fallback
-
-        return [pos_map[n] for n, _ in nodes]
-
-    fig = go.Figure()
-
-    # --- Draw compartment regions ---
+    # ── Compartment backgrounds ───────────────────────────────────────────────
     if compartment_bounds:
-        for comp_name, (y_min, y_max, x_min, x_max) in compartment_bounds.items():
-            color = COMPARTMENT_COLORS.get(comp_name, "#F5F5F5")
-            label = COMPARTMENT_LABELS.get(comp_name, comp_name)
-
-            # Draw filled rectangle for compartment
-            fig.add_shape(
-                type="rect",
-                x0=x_min, y0=y_min, x1=x_max, y1=y_max,
-                fillcolor=color,
-                opacity=0.5,
-                line=dict(color="#999999", width=2.0 if ppt_mode else 1.5, dash="dot"),
-                layer="below",
+        for comp, (cy_min, cy_max, cx_min, cx_max) in compartment_bounds.items():
+            face = COMPARTMENT_COLORS.get(comp, "#F5F5F5")
+            lbl  = COMPARTMENT_LABELS.get(comp, comp)
+            rect = Rectangle(
+                (cx_min, cy_min),
+                cx_max - cx_min, cy_max - cy_min,
+                facecolor=face, alpha=0.45,
+                edgecolor="#999999", linewidth=0.8, linestyle="--",
+                zorder=0,
+            )
+            ax.add_patch(rect)
+            # Label just above the top edge of the box
+            ax.text(
+                cx_min + 6, cy_max + y_spacing * 0.08,
+                lbl,
+                fontsize=COMP_FONT, fontweight="bold", color="#555555",
+                va="bottom", ha="left", zorder=5,
             )
 
-            # Compartment label: placed just ABOVE the bounding box (outside top edge)
-            # so it never overlaps with node labels inside the box.
-            label_gap = 12 if ppt_mode else 8
-            fig.add_annotation(
-                x=x_min + 10, y=y_max + label_gap,
-                text=f"<b>{label}</b>",
-                showarrow=False,
-                font=dict(size=COMP_LABEL_SIZE, color="#444444"),
-                xanchor="left", yanchor="bottom",
-            )
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    def _node_radius(node_id):
+        """Return the visual radius of a node in data units."""
+        ntype = G.nodes[node_id].get("type", "metabolite")
+        return enz_hf if ntype == "enzyme" else met_r
 
-    # --- Draw edges as annotation arrows (line + arrowhead in one) ---
-    # Using annotation-only (no separate Scatter trace) so the arrowhead
-    # is always visible and the line does not overdraw the head.
-    for u, v, edata in G.edges(data=True):
+    def _arrow(x0, y0, x1, y1, r0, r1):
+        """Draw an arrow from node-edge to node-edge in data coordinates."""
+        dx, dy = x1 - x0, y1 - y0
+        dist = np.hypot(dx, dy)
+        if dist < 1e-6:
+            return
+        ux, uy = dx / dist, dy / dist
+        xs, ys = x0 + ux * r0, y0 + uy * r0
+        xe, ye = x1 - ux * r1, y1 - uy * r1
+        ax.annotate(
+            "",
+            xy=(xe, ye), xytext=(xs, ys),
+            xycoords="data", textcoords="data",
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color="#555555",
+                lw=0.7,
+                mutation_scale=10,
+                shrinkA=0, shrinkB=0,
+            ),
+            zorder=2,
+        )
+
+    # ── Edges ─────────────────────────────────────────────────────────────────
+    for u, v in G.edges():
         if u not in layout or v not in layout:
             continue
         x0, y0 = layout[u]
         x1, y1 = layout[v]
+        _arrow(x0, y0, x1, y1, _node_radius(u), _node_radius(v))
 
-        fig.add_annotation(
-            x=x1, y=y1,
-            ax=x0, ay=y0,
-            xref="x", yref="y",
-            axref="x", ayref="y",
-            showarrow=True,
-            arrowhead=2,          # open arrowhead (clearly visible)
-            arrowsize=ARROW_SIZE,
-            arrowwidth=ARROW_WIDTH,
-            arrowcolor="#555555",
-            opacity=0.85,
-            standoff=STANDOFF,
-            text="",
-        )
-
-    # --- Metabolite nodes ---
+    # ── Metabolite nodes ──────────────────────────────────────────────────────
     met_nodes = [(n, d) for n, d in G.nodes(data=True)
                  if d.get("type") == "metabolite" and n in layout]
 
-    # --- Helper: alternating top/bottom label positions within each x-level ---
-    def _alternating_textpos(nodes, default_top: bool = True):
-        """Return a list of textposition strings, alternating top/bottom
-        for nodes that share the same x-level (sorted by y, high→low).
-        Nodes alone at their level keep the default position."""
-        # Group by x-level
-        by_level: dict = {}
-        for n, _ in nodes:
-            x = layout[n][0]
-            by_level.setdefault(x, []).append(n)
+    # Label collision: "top center" unless node directly above is too close
+    def _label_pos(n, x, y):
+        above_close = any(
+            0 < (layout[m][1] - y) <= y_spacing * 0.7
+            for m in layout
+            if abs(layout[m][0] - x) < y_spacing * 0.5 and m != n
+        )
+        if not above_close:
+            return (x, y + met_r + y_spacing * 0.04, "center", "bottom")
+        # check right side clear
+        right_close = any(
+            0 < (layout[m][0] - x) <= y_spacing * 0.9
+            and abs(layout[m][1] - y) < y_spacing * 0.5
+            for m in layout if m != n
+        )
+        if not right_close:
+            return (x + met_r + y_spacing * 0.04, y, "left", "center")
+        return (x - met_r - y_spacing * 0.04, y, "right", "center")
 
-        pos_map: dict = {}
-        for x, group in by_level.items():
-            # Sort by y descending (top of screen = highest y)
-            group_sorted = sorted(group, key=lambda n: layout[n][1], reverse=True)
-            for i, n in enumerate(group_sorted):
-                pos_map[n] = "top center" if (i % 2 == 0) == default_top else "bottom center"
-        return [pos_map[n] for n, _ in nodes]
+    for n, d in met_nodes:
+        x, y = layout[n]
+        fc   = d.get("fold_change")
+        face = _fc_color(fc)
+        edge_col = "black" if fc is not None else "#aaaaaa"
+        lw = 1.2 if fc is not None else 0.6
 
-    if met_nodes:
-        met_x = [layout[n][0] for n, _ in met_nodes]
-        met_y = [layout[n][1] for n, _ in met_nodes]
-        met_colors = []
-        met_text = []
-        met_hover = []
-        met_line_colors = []
+        circ = Circle((x, y), met_r,
+                       facecolor=face, edgecolor=edge_col,
+                       linewidth=lw, zorder=3)
+        ax.add_patch(circ)
 
-        for n, d in met_nodes:
-            fc = d.get("fold_change")
-            met_colors.append(fc if fc is not None else 0)
-            met_text.append(d.get("name", n))
-            chebi = d.get("chebi_id", "")
-            comp = d.get("compartment", "")
-            fc_str = f"{fc:.2f}" if fc is not None else "N/A"
-            met_hover.append(
-                f"<b>{d.get('full_name', d.get('name', n))}</b><br>"
-                f"ChEBI: {chebi}<br>"
-                f"Compartment: {comp}<br>"
-                f"log2FC: {fc_str}"
-            )
-            met_line_colors.append("black" if fc is not None else "#999999")
+        lx, ly, ha, va = _label_pos(n, x, y)
+        ax.text(lx, ly, d.get("name", n),
+                fontsize=MET_FONT, ha=ha, va=va,
+                color="#111111", zorder=6,
+                clip_on=True)
 
-        fig.add_trace(go.Scatter(
-            x=met_x, y=met_y,
-            mode="markers+text",
-            marker=dict(
-                size=MET_MARKER_SIZE,
-                color=met_colors,
-                colorscale="RdBu_r",
-                cmin=-3, cmax=3,
-                line=dict(width=MET_LINE_WIDTH, color=met_line_colors),
-                colorbar=dict(
-                    title=dict(text="log2FC", font=dict(size=COLORBAR_FONT)),
-                    x=1.02,
-                    tickvals=[-3, -1.5, 0, 1.5, 3],
-                    tickfont=dict(size=COLORBAR_FONT - 1),
-                ),
-            ),
-            text=met_text,
-            textposition=_best_textpos_met(met_nodes),
-            textfont=dict(size=MET_FONT_SIZE, color="#222222"),
-            hovertext=met_hover,
-            hoverinfo="text",
-            name="Metabolites",
-        ))
-
-    # --- Enzyme nodes ---
+    # ── Enzyme nodes (small white diamond) ────────────────────────────────────
     enz_nodes = [(n, d) for n, d in G.nodes(data=True)
                  if d.get("type") == "enzyme" and n in layout]
 
-    if enz_nodes:
-        enz_x = [layout[n][0] for n, _ in enz_nodes]
-        enz_y = [layout[n][1] for n, _ in enz_nodes]
-        enz_text = [d.get("name", n)[:25] for n, d in enz_nodes]
-        enz_hover = [
-            f"<b>{d.get('full_name', d.get('name', n))}</b><br>"
-            f"Compartment: {d.get('compartment', '')}"
-            for n, d in enz_nodes
-        ]
+    for n, d in enz_nodes:
+        x, y = layout[n]
+        h = enz_hf
+        diamond = Polygon(
+            [(x, y + h), (x + h, y), (x, y - h), (x - h, y)],
+            closed=True,
+            facecolor="white", edgecolor="black",
+            linewidth=0.7, zorder=3,
+        )
+        ax.add_patch(diamond)
+        ax.text(x, y - h - y_spacing * 0.03,
+                d.get("name", n),
+                fontsize=ENZ_FONT, ha="center", va="top",
+                color="#444444", zorder=6, clip_on=True)
 
-        fig.add_trace(go.Scatter(
-            x=enz_x, y=enz_y,
-            mode="markers+text",
-            marker=dict(
-                size=ENZ_MARKER_SIZE,
-                color="white",
-                symbol="diamond",
-                line=dict(width=ENZ_LINE_WIDTH, color="black"),
-            ),
-            text=enz_text,
-            textposition=_alternating_textpos(enz_nodes, default_top=False),
-            textfont=dict(size=ENZ_FONT_SIZE, color="#3a7ac0"),
-            hovertext=enz_hover,
-            hoverinfo="text",
-            name="Enzymes",
-        ))
+    # ── Colour-bar ────────────────────────────────────────────────────────────
+    sm = ScalarMappable(cmap=_CMAP, norm=_NORM)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.45, aspect=18, pad=0.01,
+                        fraction=0.03)
+    cbar.set_label("log2FC", fontsize=MET_FONT + 1)
+    cbar.ax.tick_params(labelsize=MET_FONT)
 
-    # --- Layout dimensions (width/height already computed above) ---
-    all_x = [pos[0] for pos in layout.values()]
-    all_y = [pos[1] for pos in layout.values()]
-    x_pad = 100 if ppt_mode else 60
-    y_pad = 60 if ppt_mode else 40
+    # ── Legend ────────────────────────────────────────────────────────────────
+    legend_handles = [
+        mpatches.Patch(facecolor="#d0d0d0", edgecolor="black",
+                       linewidth=0.8, label="Metabolite (unmeasured)"),
+        mpatches.Patch(facecolor=_fc_color(2.5), edgecolor="black",
+                       linewidth=0.8, label="Metabolite (up-regulated)"),
+        mpatches.Patch(facecolor=_fc_color(-2.5), edgecolor="black",
+                       linewidth=0.8, label="Metabolite (down-regulated)"),
+        mpatches.Patch(facecolor="white", edgecolor="black",
+                       linewidth=0.7, label="Enzyme ◇"),
+    ]
+    ax.legend(handles=legend_handles, loc="upper right",
+              fontsize=MET_FONT - 1, framealpha=0.8,
+              handlelength=1.2, handleheight=1.0)
 
-    layout_kwargs = dict(
-        title=dict(
-            text=f"Pathway Flow: {pathway_name}",
-            font_size=TITLE_SIZE,
-        ),
-        showlegend=True,
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-            bgcolor="rgba(255,255,255,0.8)",
-            font=dict(size=13 if ppt_mode else 11),
-        ),
-        xaxis=dict(
-            showgrid=False, zeroline=False, showticklabels=False,
-            range=[min(all_x) - x_pad, max(all_x) + x_pad],
-        ),
-        yaxis=dict(
-            showgrid=False, zeroline=False, showticklabels=False,
-            # Extra headroom above: compartment labels sit at y_max + label_gap
-            # (label_gap=12/8), so ensure at least that much space above nodes.
-            range=[min(all_y) - y_pad, max(all_y) + max(y_pad, 50)],
-        ),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        width=fig_width,
-        height=fig_height,
-        margin=dict(t=80, l=30, r=80, b=30) if ppt_mode else dict(t=60, l=20, r=60, b=20),
-    )
-
-    fig.update_layout(**layout_kwargs)
-
-    return fig
+    plt.tight_layout()
+    return _MplFig(fig)
 
 
+# ── Pathway summary table (kept as Plotly for interactivity) ──────────────────
 def create_pathway_summary_table(
     enrichment_results: "pd.DataFrame",
     top_n: int = 10,
-) -> go.Figure:
+) -> "go.Figure":
     """Create a summary table of top enriched pathways for selection."""
     import pandas as pd
+    import plotly.graph_objects as go
 
-    if enrichment_results.empty:
+    if enrichment_results is None or enrichment_results.empty:
         fig = go.Figure()
-        fig.add_annotation(text="No enriched pathways", showarrow=False, font_size=16)
+        fig.add_annotation(text="No enrichment results available.",
+                           showarrow=False)
         return fig
 
-    df = enrichment_results.head(top_n)
+    df = enrichment_results.head(top_n).copy()
+    cols = [c for c in
+            ["pathway_name", "top_level_name", "overlap_count",
+             "pathway_size", "pvalue", "padj", "combined_score"]
+            if c in df.columns]
+
+    for fc in ["pvalue", "padj"]:
+        if fc in df.columns:
+            df[fc] = df[fc].map(lambda v: f"{v:.2e}")
+    if "combined_score" in df.columns:
+        df["combined_score"] = df["combined_score"].map(lambda v: f"{v:.3f}")
 
     fig = go.Figure(data=[go.Table(
         header=dict(
-            values=["Pathway", "Category", "Overlap", "FDR", "Score"],
-            fill_color="#2c3e50",
+            values=[c.replace("_", " ").title() for c in cols],
+            fill_color="#4a90d9",
             font=dict(color="white", size=12),
             align="left",
         ),
         cells=dict(
-            values=[
-                df["pathway_name"].str[:45],
-                df["top_level_name"].str[:20],
-                df["overlap_count"],
-                df["padj"].apply(lambda x: f"{x:.2e}"),
-                df.get("combined_score", df.get("score", pd.Series(0))).apply(lambda x: f"{x:.1f}"),
-            ],
-            fill_color=[["#f8f9fa", "#ffffff"] * (len(df) // 2 + 1)],
+            values=[df[c].tolist() for c in cols],
+            fill_color=[["#f7f9fc", "#eef2f8"] * (len(df) // 2 + 1)],
             align="left",
-            font_size=11,
+            font=dict(size=11),
         ),
     )])
-
     fig.update_layout(
-        title="Top Enriched Pathways (click row to view flow diagram)",
-        height=max(300, 40 * top_n),
-        margin=dict(t=40, l=10, r=10, b=10),
+        title="Top Enriched Pathways",
+        margin=dict(t=50, l=10, r=10, b=10),
+        height=min(400, 80 + len(df) * 30),
     )
-
     return fig
