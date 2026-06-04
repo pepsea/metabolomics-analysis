@@ -41,11 +41,24 @@ class _MplFig:
     def __init__(self, fig: plt.Figure):
         self._fig = fig
 
-    # Jupyter: display the figure
-    def show(self):
-        from IPython.display import display as _display
-        _display(self._fig)
+    # Jupyter: render to PNG and display as an image.
+    # We force the "Agg" backend (no GUI), which disables IPython's inline
+    # figure formatter — so display(fig) would print the text repr
+    # "<Figure size ...>" instead of the image. Rendering to a PNG buffer and
+    # displaying that via IPython.display.Image is backend-independent.
+    def show(self, dpi: int = 110):
+        import io
+        try:
+            from IPython.display import Image, display
+        except ImportError:
+            plt.show()
+            return
+        buf = io.BytesIO()
+        self._fig.savefig(buf, format="png", dpi=dpi,
+                          bbox_inches="tight", facecolor="white")
         plt.close(self._fig)
+        buf.seek(0)
+        display(Image(data=buf.getvalue()))
 
     # PNG / SVG export (scale maps to DPI multiplier on 100-dpi base)
     def write_image(self, path, scale: float = 1.0, **_kw):
@@ -138,11 +151,12 @@ def create_pathway_flow_diagram(
     data_w = x_range + 2 * x_pad
     data_h = y_range + y_pad_bot + y_pad_top
 
-    base_fig_w = 13.0 * fig_scale   # inches
+    base_fig_w = 12.0 * fig_scale   # inches
     fig_w = base_fig_w
-    # Keep equal aspect so circles look round
+    # Keep equal aspect so circles look round; cap height so dense (tall)
+    # graphs stay viewable on screen instead of becoming enormous.
     fig_h = fig_w * (data_h / data_w)
-    fig_h = max(4.0 * fig_scale, min(22.0 * fig_scale, fig_h))
+    fig_h = max(3.5 * fig_scale, min(15.0 * fig_scale, fig_h))
 
     # ── Create figure ─────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
