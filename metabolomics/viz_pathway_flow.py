@@ -135,18 +135,22 @@ def create_pathway_flow_diagram(
     MIN_MARKER  = 8 * fig_scale            # smallest readable circle
     FILL = 0.72                            # circle fills ~72% of the gap
 
-    base_plot_h = max(fig_h - V_MARGIN_PX, 1)
-    gap_px_base = min_gap * (base_plot_h / y_data_range)
-    marker_fit  = gap_px_base * FILL
+    # Each stacked node needs enough vertical room for BOTH its marker AND its
+    # text label, otherwise labels overlap. A label line is ~1.7× its font px.
+    label_px   = MET_FONT * 1.7 * fig_scale
+    req_row_px = max(MIN_MARKER / FILL, label_px + 4 * fig_scale)
 
-    if marker_fit >= MIN_MARKER:
-        # Fits at the fixed landscape height: just shrink the marker.
-        MARKER_SIZE = max(MIN_MARKER, min(MAX_MARKER, marker_fit))
-    else:
-        # Too crowded even at the minimum marker → grow the figure height.
-        MARKER_SIZE = MIN_MARKER
-        needed_plot_h = (MARKER_SIZE / FILL) * y_data_range / min_gap
-        fig_h = int(min(4000 * fig_scale, needed_plot_h + V_MARGIN_PX))
+    base_plot_h = max(fig_h - V_MARGIN_PX, 1)
+    # Plot height so the tightest stacking gap maps to at least req_row_px.
+    needed_plot_h = req_row_px * (y_data_range / min_gap)
+    plot_h = max(base_plot_h, needed_plot_h)
+    if plot_h > base_plot_h:
+        # Grow the figure (taller) so nothing overlaps; keep landscape width.
+        fig_h = int(min(6000 * fig_scale, plot_h + V_MARGIN_PX))
+        plot_h = fig_h - V_MARGIN_PX
+
+    gap_px = min_gap * (plot_h / y_data_range)
+    MARKER_SIZE = max(MIN_MARKER, min(MAX_MARKER, gap_px * FILL))
 
     # ── Compartment background bands ──────────────────────────────────────────
     if compartment_bounds:
