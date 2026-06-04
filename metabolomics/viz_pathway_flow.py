@@ -14,6 +14,7 @@ def create_pathway_flow_diagram(
     pathway_name: str,
     compartment_bounds: Optional[Dict[str, Tuple[float, float, float, float]]] = None,
     ppt_mode: bool = True,
+    fig_scale: float = 1.0,
 ) -> go.Figure:
     """Render a pathway as an interactive flow diagram with compartment regions.
 
@@ -57,7 +58,8 @@ def create_pathway_flow_diagram(
         COLORBAR_FONT = 13
         STANDOFF = 20
         MET_LINE_WIDTH = 2.5
-        BASE_HEIGHT = 700
+        BASE_WIDTH = 1200   # slightly smaller default than before
+        BASE_HEIGHT = 580
         V_MARGINS = 110
     else:
         MET_MARKER_MAX = 22
@@ -74,7 +76,8 @@ def create_pathway_flow_diagram(
         COLORBAR_FONT = 11
         STANDOFF = 12
         MET_LINE_WIDTH = 2
-        BASE_HEIGHT = 550
+        BASE_WIDTH = 900
+        BASE_HEIGHT = 480
         V_MARGINS = 80
 
     # --- Dynamic marker size based on node density (metabolites only) ---
@@ -96,6 +99,10 @@ def create_pathway_flow_diagram(
                              int(max_nodes_per_level * (MET_MARKER_MIN / FILL_RATIO)) + V_MARGINS)
         else:
             fig_height = BASE_HEIGHT
+
+    # Apply fig_scale to both dimensions (after density-based height is settled)
+    fig_width = int(BASE_WIDTH * fig_scale)
+    fig_height = int(fig_height * fig_scale)
 
     # --- Compute scale for label-collision detection ---
     _y_vals = [pos[1] for pos in layout.values()]
@@ -318,12 +325,11 @@ def create_pathway_flow_diagram(
             name="Enzymes",
         ))
 
-    # --- Layout dimensions (fixed width, dynamic height computed above) ---
+    # --- Layout dimensions (width/height already computed above) ---
     all_x = [pos[0] for pos in layout.values()]
     all_y = [pos[1] for pos in layout.values()]
     x_pad = 100 if ppt_mode else 60
     y_pad = 60 if ppt_mode else 40
-    fig_width = 1400 if ppt_mode else 1000
 
     layout_kwargs = dict(
         title=dict(
