@@ -267,8 +267,12 @@ class PathwayGraphBuilder:
         if hide_ubiquitous and chebi_id and chebi_id in UBIQUITOUS_CHEBI_IDS:
             return None
 
-        # Use ChEBI ID as unique node ID (deduplication)
-        node_id = chebi_id if chebi_id else f"met_{st_id}"
+        # Node ID = ChEBI ID + compartment so the same molecule in different
+        # compartments gets separate nodes (important for transport reactions).
+        if chebi_id:
+            node_id = f"{chebi_id}_{compartment}" if compartment else chebi_id
+        else:
+            node_id = f"met_{st_id}"
 
         fc = None
         if metabolite_fc and chebi_id:

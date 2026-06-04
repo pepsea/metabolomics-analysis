@@ -52,8 +52,8 @@ def create_pathway_flow_diagram(
         ENZ_FONT_SIZE = 12
         COMP_LABEL_SIZE = 16
         EDGE_WIDTH = 0.8
-        ARROW_SIZE = 0.8
-        ARROW_WIDTH = 0.8
+        ARROW_SIZE = 1.8
+        ARROW_WIDTH = 1.5
         TITLE_SIZE = 22
         COLORBAR_FONT = 13
         STANDOFF = 20
@@ -70,8 +70,8 @@ def create_pathway_flow_diagram(
         ENZ_FONT_SIZE = 8
         COMP_LABEL_SIZE = 11
         EDGE_WIDTH = 0.6
-        ARROW_SIZE = 0.7
-        ARROW_WIDTH = 0.7
+        ARROW_SIZE = 1.5
+        ARROW_WIDTH = 1.2
         TITLE_SIZE = 16
         COLORBAR_FONT = 11
         STANDOFF = 12
@@ -188,40 +188,28 @@ def create_pathway_flow_diagram(
                 xanchor="left", yanchor="bottom",
             )
 
-    # --- Draw edges with arrows ---
-    # All edges are flow edges (Met→Enz→Met or direct Met→Met)
+    # --- Draw edges as annotation arrows (line + arrowhead in one) ---
+    # Using annotation-only (no separate Scatter trace) so the arrowhead
+    # is always visible and the line does not overdraw the head.
     for u, v, edata in G.edges(data=True):
         if u not in layout or v not in layout:
             continue
         x0, y0 = layout[u]
         x1, y1 = layout[v]
 
-        line_color = "#666666"
-        line_dash = "solid"
-        line_width = EDGE_WIDTH
-
-        # Draw edge line
-        fig.add_trace(go.Scatter(
-            x=[x0, x1, None], y=[y0, y1, None],
-            mode="lines",
-            line=dict(width=line_width, color=line_color, dash=line_dash),
-            hoverinfo="none",
-            showlegend=False,
-        ))
-
-        # Arrow annotation
         fig.add_annotation(
             x=x1, y=y1,
             ax=x0, ay=y0,
             xref="x", yref="y",
             axref="x", ayref="y",
             showarrow=True,
-            arrowhead=3,
+            arrowhead=2,          # open arrowhead (clearly visible)
             arrowsize=ARROW_SIZE,
             arrowwidth=ARROW_WIDTH,
-            arrowcolor=line_color,
-            opacity=0.7,
+            arrowcolor="#555555",
+            opacity=0.85,
             standoff=STANDOFF,
+            text="",
         )
 
     # --- Metabolite nodes ---
