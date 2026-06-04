@@ -32,6 +32,40 @@ UBIQUITOUS_CHEBI_IDS = {
     "CHEBI:29103",  # K+
 }
 
+# Inorganic ions / small inorganic species that LC-MS cannot measure.
+# Hidden together with the ubiquitous set when hide_ubiquitous=True.
+INORGANIC_ION_CHEBI_IDS = {
+    "CHEBI:29101",  # Na+
+    "CHEBI:17996",  # Cl-
+    "CHEBI:29103",  # K+
+    "CHEBI:29108",  # Ca2+
+    "CHEBI:18420",  # Mg2+
+    "CHEBI:29105",  # Zn2+
+    "CHEBI:29033",  # Fe2+
+    "CHEBI:29034",  # Fe3+
+    "CHEBI:29036",  # Cu2+
+    "CHEBI:49552",  # Cu+
+    "CHEBI:29035",  # Mn2+
+    "CHEBI:48828",  # Co2+
+    "CHEBI:28938",  # NH4+ (ammonium)
+    "CHEBI:16134",  # NH3 (ammonia)
+    "CHEBI:17544",  # hydrogencarbonate (HCO3-)
+    "CHEBI:41609",  # carbonate (CO3 2-)
+    "CHEBI:15379",  # O2 (dioxygen)
+    "CHEBI:16240",  # H2O2
+    "CHEBI:16189",  # sulfate (SO4 2-)
+    "CHEBI:16136",  # H2S
+    "CHEBI:29919",  # HS-
+    "CHEBI:16382",  # iodide (I-)
+    "CHEBI:16480",  # nitric oxide (NO)
+    "CHEBI:18367",  # phosphate(3-)
+    "CHEBI:43474",  # hydrogenphosphate (Pi)
+    "CHEBI:33019",  # diphosphate (PPi)
+    "CHEBI:15377",  # H2O
+    "CHEBI:15378",  # H+
+    "CHEBI:16526",  # CO2
+}
+
 # Canonical compartment ordering (outside → inside cell)
 COMPARTMENT_ORDER = [
     "extracellular region",
@@ -256,7 +290,7 @@ class PathwayGraphBuilder:
         if not chebi_id:
             return None
 
-        if hide_ubiquitous and chebi_id in UBIQUITOUS_CHEBI_IDS:
+        if hide_ubiquitous and chebi_id in (UBIQUITOUS_CHEBI_IDS | INORGANIC_ION_CHEBI_IDS):
             return None
 
         # Node ID = ChEBI ID + compartment so the same molecule in different
