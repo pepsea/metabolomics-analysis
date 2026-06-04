@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")          # non-interactive; Jupyter shows via display()
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.patches import Circle, Polygon, Rectangle
+from matplotlib.patches import Rectangle
 from matplotlib.colors import Normalize, to_rgba
 from matplotlib.cm import ScalarMappable
 import matplotlib.cm as mcm
@@ -142,30 +142,35 @@ def create_pathway_flow_diagram(
     y_gaps = [y_sorted[i+1] - y_sorted[i] for i in range(len(y_sorted)-1)]
     y_spacing = min(y_gaps) if y_gaps else 100
 
-    # Node sizes in data units
-    # metabolite radius ≈ 28% of y_spacing; enzyme diamond half-size ≈ 12%
-    met_r  = y_spacing * 0.28
-    enz_hf = y_spacing * 0.12
+    # ── Fixed landscape PPT figure (16:9) ────────────────────────────────────
+    # PowerPoint widescreen slide is 13.33 × 7.5 inches. The figure is ALWAYS
+    # this landscape size (× fig_scale) so the PNG drops cleanly onto a slide.
+    # Nodes are drawn as screen-space markers (points), so aspect='auto' fills
+    # the whole frame while circles/diamonds stay perfectly round.
+    fig_w = 13.33 * fig_scale
+    fig_h = 7.5 * fig_scale
 
-    # ── Figure size from data aspect ratio ───────────────────────────────────
-    data_w = x_range + 2 * x_pad
-    data_h = y_range + y_pad_bot + y_pad_top
+    xlo, xhi = x_min - x_pad, x_max + x_pad
+    ylo, yhi = y_min - y_pad_bot, y_max + y_pad_top
 
-    base_fig_w = 12.0 * fig_scale   # inches
-    fig_w = base_fig_w
-    # Keep equal aspect so circles look round; cap height so dense (tall)
-    # graphs stay viewable on screen instead of becoming enormous.
-    fig_h = fig_w * (data_h / data_w)
-    fig_h = max(3.5 * fig_scale, min(15.0 * fig_scale, fig_h))
-
-    # ── Create figure ─────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.set_aspect("equal")
-    ax.set_xlim(x_min - x_pad, x_max + x_pad)
-    ax.set_ylim(y_min - y_pad_bot, y_max + y_pad_top)
+    ax.set_aspect("auto")           # fill the landscape frame
+    ax.set_xlim(xlo, xhi)
+    ax.set_ylim(ylo, yhi)
     ax.axis("off")
     ax.set_title(f"Pathway Flow: {pathway_name}",
                  fontsize=TITLE_FONT, fontweight="bold", pad=8)
+
+    # ── Marker sizes in POINTS (screen space → always round) ──────────────────
+    n_rows = max(len(y_sorted), 1)
+    # Vertical space per row, in points (1 inch = 72 pt). Use 78% of frame
+    # height for the plotting area, reserve the rest for title/margins.
+    pts_per_row = (fig_h * 0.78 * 72) / n_rows
+    met_d = max(7.0, min(34.0, pts_per_row * 0.55))   # metabolite diameter (pt)
+    enz_d = met_d * 0.55                              # enzyme diamond (pt)
+    met_s = met_d ** 2                                # scatter area = pt²
+    enz_s = enz_d ** 2
+    met_r_pt = met_d / 2.0                            # radius in points
 
     # ── Compartment backgrounds ───────────────────────────────────────────────
     if compartment_bounds:
@@ -188,102 +193,82 @@ def create_pathway_flow_diagram(
                 va="bottom", ha="left", zorder=5,
             )
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
-    def _node_radius(node_id):
-        """Return the visual radius of a node in data units."""
-        ntype = G.nodes[node_id].get("type", "metabolite")
-        return enz_hf if ntype == "enzyme" else met_r
+    # ── Edges (annotate arrows; shrink by marker radius in points) ────────────
+    def _radius_pt(node_id):
+        return (enz_d / 2.0) if G.nodes[node_id].get("type") == "enzyme" else met_r_pt
 
-    def _arrow(x0, y0, x1, y1, r0, r1):
-        """Draw an arrow from node-edge to node-edge in data coordinates."""
-        dx, dy = x1 - x0, y1 - y0
-        dist = np.hypot(dx, dy)
-        if dist < 1e-6:
-            return
-        ux, uy = dx / dist, dy / dist
-        xs, ys = x0 + ux * r0, y0 + uy * r0
-        xe, ye = x1 - ux * r1, y1 - uy * r1
-        ax.annotate(
-            "",
-            xy=(xe, ye), xytext=(xs, ys),
-            xycoords="data", textcoords="data",
-            arrowprops=dict(
-                arrowstyle="-|>",
-                color="#555555",
-                lw=0.7,
-                mutation_scale=10,
-                shrinkA=0, shrinkB=0,
-            ),
-            zorder=2,
-        )
-
-    # ── Edges ─────────────────────────────────────────────────────────────────
     for u, v in G.edges():
         if u not in layout or v not in layout:
             continue
         x0, y0 = layout[u]
         x1, y1 = layout[v]
-        _arrow(x0, y0, x1, y1, _node_radius(u), _node_radius(v))
+        ax.annotate(
+            "",
+            xy=(x1, y1), xytext=(x0, y0),
+            xycoords="data", textcoords="data",
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color="#555555",
+                lw=0.7,
+                mutation_scale=11,
+                shrinkA=_radius_pt(u),
+                shrinkB=_radius_pt(v) + 2,
+            ),
+            zorder=2,
+        )
 
-    # ── Metabolite nodes ──────────────────────────────────────────────────────
+    # ── Column membership (for label placement) ──────────────────────────────
+    col_counts: Dict[float, int] = {}
+    for p in layout.values():
+        col_counts[round(p[0])] = col_counts.get(round(p[0]), 0) + 1
+
+    # ── Metabolite nodes (scatter = round regardless of aspect) ───────────────
     met_nodes = [(n, d) for n, d in G.nodes(data=True)
                  if d.get("type") == "metabolite" and n in layout]
+    if met_nodes:
+        mx = [layout[n][0] for n, _ in met_nodes]
+        my = [layout[n][1] for n, _ in met_nodes]
+        mface = [_fc_color(d.get("fold_change")) for _, d in met_nodes]
+        medge = ["black" if d.get("fold_change") is not None else "#aaaaaa"
+                 for _, d in met_nodes]
+        mlw = [1.2 if d.get("fold_change") is not None else 0.6
+               for _, d in met_nodes]
+        ax.scatter(mx, my, s=met_s, c=mface, edgecolors=medge,
+                   linewidths=mlw, zorder=3)
 
-    # Label collision: "top center" unless node directly above is too close
-    def _label_pos(n, x, y):
-        above_close = any(
-            0 < (layout[m][1] - y) <= y_spacing * 0.7
-            for m in layout
-            if abs(layout[m][0] - x) < y_spacing * 0.5 and m != n
-        )
-        if not above_close:
-            return (x, y + met_r + y_spacing * 0.04, "center", "bottom")
-        # check right side clear
-        right_close = any(
-            0 < (layout[m][0] - x) <= y_spacing * 0.9
-            and abs(layout[m][1] - y) < y_spacing * 0.5
-            for m in layout if m != n
-        )
-        if not right_close:
-            return (x + met_r + y_spacing * 0.04, y, "left", "center")
-        return (x - met_r - y_spacing * 0.04, y, "right", "center")
+        # Labels: above the marker by default; for multi-node columns place to
+        # the right so vertically-stacked labels don't overlap neighbours.
+        for n, d in met_nodes:
+            x, y = layout[n]
+            if col_counts.get(round(x), 1) > 1:
+                ax.annotate(d.get("name", n), (x, y),
+                            textcoords="offset points",
+                            xytext=(met_r_pt + 3, 0),
+                            ha="left", va="center",
+                            fontsize=MET_FONT, color="#111111", zorder=6)
+            else:
+                ax.annotate(d.get("name", n), (x, y),
+                            textcoords="offset points",
+                            xytext=(0, met_r_pt + 2),
+                            ha="center", va="bottom",
+                            fontsize=MET_FONT, color="#111111", zorder=6)
 
-    for n, d in met_nodes:
-        x, y = layout[n]
-        fc   = d.get("fold_change")
-        face = _fc_color(fc)
-        edge_col = "black" if fc is not None else "#aaaaaa"
-        lw = 1.2 if fc is not None else 0.6
-
-        circ = Circle((x, y), met_r,
-                       facecolor=face, edgecolor=edge_col,
-                       linewidth=lw, zorder=3)
-        ax.add_patch(circ)
-
-        lx, ly, ha, va = _label_pos(n, x, y)
-        ax.text(lx, ly, d.get("name", n),
-                fontsize=MET_FONT, ha=ha, va=va,
-                color="#111111", zorder=6,
-                clip_on=True)
-
-    # ── Enzyme nodes (small white diamond) ────────────────────────────────────
+    # ── Enzyme nodes (small white diamonds) ───────────────────────────────────
     enz_nodes = [(n, d) for n, d in G.nodes(data=True)
                  if d.get("type") == "enzyme" and n in layout]
-
-    for n, d in enz_nodes:
-        x, y = layout[n]
-        h = enz_hf
-        diamond = Polygon(
-            [(x, y + h), (x + h, y), (x, y - h), (x - h, y)],
-            closed=True,
-            facecolor="white", edgecolor="black",
-            linewidth=0.7, zorder=3,
-        )
-        ax.add_patch(diamond)
-        ax.text(x, y - h - y_spacing * 0.03,
-                d.get("name", n),
-                fontsize=ENZ_FONT, ha="center", va="top",
-                color="#444444", zorder=6, clip_on=True)
+    if enz_nodes:
+        ex = [layout[n][0] for n, _ in enz_nodes]
+        ey = [layout[n][1] for n, _ in enz_nodes]
+        ax.scatter(ex, ey, s=enz_s, marker="D",
+                   facecolors="white", edgecolors="black",
+                   linewidths=0.7, zorder=3)
+        for n, d in enz_nodes:
+            x, y = layout[n]
+            ax.annotate(d.get("name", n), (x, y),
+                        textcoords="offset points",
+                        xytext=(0, -(enz_d / 2.0) - 2),
+                        ha="center", va="top",
+                        fontsize=ENZ_FONT, color="#444444", zorder=6)
 
     # ── Colour-bar ────────────────────────────────────────────────────────────
     sm = ScalarMappable(cmap=_CMAP, norm=_NORM)
