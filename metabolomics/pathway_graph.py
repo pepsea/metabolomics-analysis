@@ -111,17 +111,17 @@ class PathwayGraphBuilder:
         metabolite_fc: Optional[Dict[str, float]] = None,
         hide_ubiquitous: bool = True,
     ) -> Optional[nx.DiGraph]:
-        """Build a directed graph for a Reactome pathway.
+        """Build a metabolite-only directed flow graph for a Reactome pathway.
 
-        Each metabolite appears exactly once (deduplicated by ChEBI ID).
-        Compartment info is stored as a node attribute.
+        The flow is represented purely by metabolites: for each reaction,
+        every substrate is connected directly to every product. Enzymes are
+        NOT nodes — the catalysing enzyme name is stored on the edge so it
+        can be shown on hover.
 
-        Nodes:
-            - type='metabolite': chebi_id, name, compartment, fold_change
-            - type='enzyme': name, compartment
-        Edges:
-            - substrate -> product (direct, no intermediate reaction nodes)
-            - enzyme -> product (catalyst)
+        Nodes (all type='metabolite'):
+            chebi_id, name, full_name, compartment, fold_change
+        Edges (substrate -> product):
+            reaction, reaction_id, enzyme  (enzyme = catalyst name, may be "")
         """
         events = self.client.get_pathway_contained_events(pathway_id)
         if not events:
@@ -172,8 +172,8 @@ class PathwayGraphBuilder:
                 if node_id:
                     output_ids.append(node_id)
 
-            # Collect enzyme/catalyst nodes for this reaction
-            enzyme_ids = []
+            # Collect catalysing enzyme name(s) — stored on edges, not as nodes
+            enzyme_names = []
             for cat in detail.get("catalystActivity", []):
                 activity = cat.get("physicalEntity")
                 if not activity:
@@ -188,45 +188,20 @@ class PathwayGraphBuilder:
                         activity = self.client.get_reaction_detail(str(activity))
                     if not activity or not isinstance(activity, dict):
                         continue
-                    enz_name_full = activity.get("displayName", "Enzyme")
-                    enz_compartment = _extract_compartment(enz_name_full)
-                    enz_name = _clean_name(enz_name_full)
-                    cat_id = f"enz_{activity.get('stId', enz_name)}"
+                    enzyme_names.append(_clean_name(activity.get("displayName", "Enzyme")))
 
-                    if not G.has_node(cat_id):
-                        G.add_node(
-                            cat_id,
-                            type="enzyme",
-                            name=enz_name[:40],
-                            full_name=enz_name,
-                            compartment=enz_compartment,
+            enzyme_label = ", ".join(dict.fromkeys(enzyme_names))  # dedup, keep order
+
+            # Metabolite-only flow: connect each substrate directly to each product
+            for inp_id in input_ids:
+                for out_id in output_ids:
+                    if inp_id != out_id:
+                        G.add_edge(
+                            inp_id, out_id,
+                            reaction=_clean_name(reaction_name),
+                            reaction_id=reaction_id,
+                            enzyme=enzyme_label,
                         )
-                    enzyme_ids.append(cat_id)
-
-            # Wire edges: Met → Enz → Met (enzyme in the middle of the flow)
-            if enzyme_ids:
-                for inp_id in input_ids:
-                    for enz_id in enzyme_ids:
-                        G.add_edge(inp_id, enz_id,
-                                   reaction=_clean_name(reaction_name),
-                                   reaction_id=reaction_id,
-                                   role="substrate")
-                for enz_id in enzyme_ids:
-                    for out_id in output_ids:
-                        G.add_edge(enz_id, out_id,
-                                   reaction=_clean_name(reaction_name),
-                                   reaction_id=reaction_id,
-                                   role="product")
-            else:
-                # No enzyme: direct substrate → product edge
-                for inp_id in input_ids:
-                    for out_id in output_ids:
-                        if inp_id != out_id:
-                            G.add_edge(
-                                inp_id, out_id,
-                                reaction=_clean_name(reaction_name),
-                                reaction_id=reaction_id,
-                            )
 
         # Remove isolated nodes
         isolated = list(nx.isolates(G))
@@ -311,103 +286,115 @@ class PathwayGraphBuilder:
         return G.subgraph(keep_list).copy()
 
 
-def compute_compartment_layout(G: nx.DiGraph) -> Dict[str, Tuple[float, float]]:
-    """Compute a flow-based landscape layout for a pathway graph.
+def compute_compartment_layout(G: nx.DiGraph):
+    """Compute a compartment-banded, left-to-right flow layout.
 
-    Nodes are arranged left-to-right by topological depth (BFS levels).
-    At each depth level, metabolites occupy vertical lanes and enzymes sit
-    between their upstream metabolites and downstream metabolites at the
-    same x position (or slightly offset).  Compartment backgrounds are
-    drawn as bounding boxes around the nodes that belong to them.
+    Design (metabolite-only flow):
+      * x = topological depth (BFS longest-path) → flow runs left to right.
+      * y = compartment band. Each compartment becomes a horizontal band,
+        stacked top-to-bottom in canonical (outside → inside) order. Bands
+        never overlap.
+      * Within a (compartment, depth) cell, multiple metabolites stack
+        vertically, centred in the band.
+
+    Returns:
+        (positions, compartment_bounds)
+        positions: {node_id: (x, y)}
+        compartment_bounds: {compartment: (y_min, y_max, x_min, x_max)}
+            — full-width horizontal bands.
     """
+    from collections import defaultdict, deque
+
     if len(G.nodes) == 0:
         return {}, {}
 
-    total_nodes = len(G.nodes)
-
-    # Adaptive spacing
-    if total_nodes > 40:
-        x_spacing = 130
-        y_spacing = 80
-    elif total_nodes > 20:
-        x_spacing = 160
-        y_spacing = 95
+    n_total = len(G.nodes)
+    if n_total > 40:
+        x_spacing, y_spacing = 170, 72
+    elif n_total > 20:
+        x_spacing, y_spacing = 200, 88
     else:
-        x_spacing = 180
-        y_spacing = 110
+        x_spacing, y_spacing = 240, 104
 
-    # --- Assign topological levels via BFS from source nodes ---
-    # Use longest-path levels so enzymes get a mid-point depth
+    # --- Topological depth (longest path from a source) ---
     level: Dict[str, int] = {}
     try:
         for node in nx.topological_sort(G):
             preds = list(G.predecessors(node))
-            if not preds:
-                level[node] = 0
-            else:
-                level[node] = max(level.get(p, 0) for p in preds) + 1
+            level[node] = 0 if not preds else max(level.get(p, 0) for p in preds) + 1
     except nx.NetworkXUnfeasible:
-        # Cycle fallback: BFS from roots
-        roots = [n for n in G.nodes if G.in_degree(n) == 0]
-        if not roots:
-            roots = list(G.nodes)[:1]
-        queue = list(roots)
-        for n in roots:
-            level[n] = 0
-        visited = set(roots)
-        while queue:
-            cur = queue.pop(0)
-            for nxt in G.successors(cur):
-                if nxt not in visited:
-                    level[nxt] = level[cur] + 1
-                    visited.add(nxt)
-                    queue.append(nxt)
+        roots = [n for n in G.nodes if G.in_degree(n) == 0] or [next(iter(G.nodes))]
+        dq = deque(roots)
+        for r in roots:
+            level[r] = 0
+        seen = set(roots)
+        while dq:
+            cur = dq.popleft()
+            for s in G.successors(cur):
+                if s not in seen:
+                    level[s] = level[cur] + 1
+                    seen.add(s)
+                    dq.append(s)
         for n in G.nodes:
-            if n not in level:
-                level[n] = 0
+            level.setdefault(n, 0)
 
-    # Group nodes by level
-    levels_map: Dict[int, List[str]] = {}
-    for node, lv in level.items():
-        levels_map.setdefault(lv, []).append(node)
+    depths = sorted(set(level.values()))
+    max_depth = max(depths) if depths else 0
 
-    # Within each level: metabolites first, then enzymes (so enzymes
-    # appear at the same x as their immediate successors)
-    positions: Dict[str, Tuple[float, float]] = {}
-    for lv, nodes in sorted(levels_map.items()):
-        mets = sorted([n for n in nodes if G.nodes[n].get("type") == "metabolite"])
-        enzs = sorted([n for n in nodes if G.nodes[n].get("type") == "enzyme"])
-        ordered = mets + enzs
-        n = len(ordered)
-        # Centre the column vertically
-        total_height = (n - 1) * y_spacing
-        y_start = -total_height / 2
-        for i, node in enumerate(ordered):
-            x = lv * x_spacing
-            y = y_start + i * y_spacing
-            positions[node] = (x, y)
+    # --- Compartments present, in canonical order ---
+    comps = list({G.nodes[n].get("compartment", "cytosol") for n in G.nodes})
 
-    # --- Build compartment bounding boxes ---
-    compartment_bounds: Dict[str, Tuple[float, float, float, float]] = {}
-    pad = 30
-    for node, data in G.nodes(data=True):
-        comp = data.get("compartment", "cytosol")
-        if node not in positions:
-            continue
-        x, y = positions[node]
-        if comp not in compartment_bounds:
-            compartment_bounds[comp] = (y, y, x, x)  # y_min, y_max, x_min, x_max
-        else:
-            y_min, y_max, x_min, x_max = compartment_bounds[comp]
-            compartment_bounds[comp] = (
-                min(y_min, y), max(y_max, y),
-                min(x_min, x), max(x_max, x),
-            )
+    def _ckey(c):
+        try:
+            return COMPARTMENT_ORDER.index(c)
+        except ValueError:
+            return 999
+    comps.sort(key=_ckey)
 
-    # Add padding
-    compartment_bounds = {
-        comp: (y_min - pad, y_max + pad, x_min - pad, x_max + pad)
-        for comp, (y_min, y_max, x_min, x_max) in compartment_bounds.items()
+    # --- Nodes per (compartment, depth) cell ---
+    cell: Dict[Tuple[str, int], List[str]] = defaultdict(list)
+    for n in G.nodes:
+        c = G.nodes[n].get("compartment", "cytosol")
+        cell[(c, level[n])].append(n)
+
+    # Rows each band needs = max nodes in any single depth column of that band
+    band_rows = {
+        c: max([len(cell[(c, d)]) for d in depths] + [1]) for c in comps
     }
+
+    # --- Assign positions, stacking bands downward ---
+    positions: Dict[str, Tuple[float, float]] = {}
+    compartment_bounds: Dict[str, Tuple[float, float, float, float]] = {}
+
+    x_left = -x_spacing * 0.45
+    x_right = max_depth * x_spacing + x_spacing * 0.45
+    gap_between_bands = y_spacing * 0.7
+    band_pad = y_spacing * 0.45
+
+    cur_top = 0.0
+    for c in comps:
+        rows = band_rows[c]
+        band_height = (rows - 1) * y_spacing
+        band_top = cur_top
+        band_bottom = cur_top - band_height
+        band_center = (band_top + band_bottom) / 2.0
+
+        for d in depths:
+            grp = sorted(cell[(c, d)])
+            k = len(grp)
+            if k == 0:
+                continue
+            sub_h = (k - 1) * y_spacing
+            y0 = band_center + sub_h / 2.0
+            for i, node in enumerate(grp):
+                positions[node] = (d * x_spacing, y0 - i * y_spacing)
+
+        compartment_bounds[c] = (
+            band_bottom - band_pad,   # y_min
+            band_top + band_pad,      # y_max
+            x_left,                   # x_min
+            x_right,                  # x_max
+        )
+        cur_top = band_bottom - gap_between_bands
 
     return positions, compartment_bounds
