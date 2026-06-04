@@ -216,7 +216,9 @@ class PathwayGraphBuilder:
         metabolite_fc: Optional[Dict[str, float]],
         hide_ubiquitous: bool,
     ) -> Optional[str]:
-        """Add a metabolite node. Returns node_id or None if skipped."""
+        """Add a metabolite node. Returns node_id, or None if the entity is
+        not a small-molecule metabolite (proteins, complexes, entity sets and
+        anything without a ChEBI identifier are skipped)."""
         display_name = entity.get("displayName", "Unknown")
         st_id = entity.get("stId", display_name)
 
@@ -224,30 +226,42 @@ class PathwayGraphBuilder:
         compartment = _extract_compartment(display_name)
         clean = _clean_name(display_name)
 
+        # Only true small molecules (SimpleEntity) carry a ChEBI reference.
+        # Proteins (EntityWithAccessionedSequence), Complexes, EntitySets, etc.
+        # are NOT metabolites and must not appear in the flow.
+        schema = entity.get("schemaClass", "")
+        if schema and schema not in ("SimpleEntity",):
+            return None
+
         # Try to extract ChEBI ID from referenceEntity
         chebi_id = None
         ref = entity.get("referenceEntity")
-        if ref:
-            if ref.get("databaseName") == "ChEBI":
-                chebi_id = f"CHEBI:{ref.get('identifier', '')}"
+        if ref and ref.get("databaseName") == "ChEBI":
+            chebi_id = f"CHEBI:{ref.get('identifier', '')}"
 
         # If no referenceEntity in the reaction response, query entity detail
         if not chebi_id and st_id and st_id.startswith("R-"):
             entity_detail = self.client.get_reaction_detail(st_id)
             if entity_detail:
+                # Re-check schema from the full detail too
+                d_schema = entity_detail.get("schemaClass", "")
+                if d_schema and d_schema not in ("SimpleEntity",):
+                    return None
                 ref = entity_detail.get("referenceEntity")
                 if ref and ref.get("databaseName") == "ChEBI":
                     chebi_id = f"CHEBI:{ref.get('identifier', '')}"
 
-        if hide_ubiquitous and chebi_id and chebi_id in UBIQUITOUS_CHEBI_IDS:
+        # No ChEBI → not a metabolite we can identify → skip (drops proteins,
+        # complexes, and unresolved entity sets so only metabolites remain).
+        if not chebi_id:
+            return None
+
+        if hide_ubiquitous and chebi_id in UBIQUITOUS_CHEBI_IDS:
             return None
 
         # Node ID = ChEBI ID + compartment so the same molecule in different
         # compartments gets separate nodes (important for transport reactions).
-        if chebi_id:
-            node_id = f"{chebi_id}_{compartment}" if compartment else chebi_id
-        else:
-            node_id = f"met_{st_id}"
+        node_id = f"{chebi_id}_{compartment}" if compartment else chebi_id
 
         fc = None
         if metabolite_fc and chebi_id:
